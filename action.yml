@@ -2,7 +2,7 @@ name: Original commit certification
 description: Certify original pull request commits and merge queue members under the DCO.
 inputs:
   token:
-    description: Caller repository token with pull request and Actions read, and checks write permissions.
+    description: Caller repository token with contents, pull requests, and Actions read, and checks write permissions.
     required: false
     default: ${{ github.token }}
   ci-workflow:
@@ -18,5 +18,13 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         DCO_CI_WORKFLOW: ${{ inputs.ci-workflow }}
         DCO_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        DCO_RUN_ID: ${{ github.run_id }}
+        DCO_RUN_ATTEMPT: ${{ github.run_attempt }}
+        DCO_CHECKER_REVISION: ${{ github.action_ref }}
         DCO_ACTION_PATH: ${{ github.action_path }}
-      run: python3 "$DCO_ACTION_PATH/scripts/dco_check.py"
+      run: |
+        if [[ -z "$DCO_CHECKER_REVISION" ]]; then
+          DCO_CHECKER_REVISION="$(git -C "$DCO_ACTION_PATH" rev-parse HEAD)"
+          export DCO_CHECKER_REVISION
+        fi
+        python3 "$DCO_ACTION_PATH/scripts/dco_check.py"

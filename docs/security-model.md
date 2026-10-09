@@ -1,0 +1,44 @@
+# Security and publisher trust
+
+Repository writers, reviewed repository workflows, GitHub Actions, and the
+reviewed pinned checker revision are trusted. Contribution code, commit display
+text, event payload claims, and CI artifacts are not execution authority.
+The checker never checks out a PR or executes its code. HTTP requests are limited
+to the supported GitHub API with bounded budgets, versioned requests, validated
+responses, and sanitized error diagnostics.
+
+## Event authority
+
+`pull_request_target` executes the base repository caller. The checker rereads the
+live PR, captures its original immutable commits, and validates state before final
+publication. `workflow_run` executes the default-branch caller and rereads the
+completed CI run, workflow identity, repository, and exact PR association; stale
+heads are ignored. `workflow_dispatch` is a maintainer-triggered default-branch
+recheck of current live PR state. `merge_group` executes the queue workflow and
+resolves original members using GraphQL queue ancestry, validating membership
+again after scanning. Missing or ambiguous evidence cannot certify a group.
+
+Use the supplied serial caller and maintain the DCO workflow on the default and
+queue base branch. Manual dispatch should target the default branch. Review all
+changes to `.github/workflows/**`, action references, check-writing permissions,
+and the checker implementation. Restrict `checks: write` to reviewed publishers;
+never pass a write-capable token into contribution code or artifact-driven scripts.
+
+## Required-check binding
+
+Binding `DCO-owned` to GitHub Actions rejects another app's check. It does **not**
+uniquely authenticate this checker: another workflow with `checks: write` can
+publish that name under the same app. Workflow protection, code ownership, reviewed
+full-SHA pins, and trusted writers are the enforceable boundary of this design.
+The evidence identity and run link support auditing, not independent authorization
+against a malicious trusted writer. A deployment requiring isolation from repository
+writers needs a separately controlled publisher and credential architecture.
+
+## Review controls
+
+Protect default branches with required CI and DCO checks, disallow force pushes and
+deletions, and require PR delivery. CODEOWNERS identifies review responsibility.
+Use an approval count consistent with available independent reviewers; zero required
+approvals remains a deliberate single-maintainer operating model, not independent
+review. Record administrator bypasses and emergency changes in release evidence.
+See [SECURITY.md](../SECURITY.md) for reporting and incident response.

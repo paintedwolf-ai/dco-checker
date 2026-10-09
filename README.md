@@ -1,41 +1,57 @@
 # DCO checker
 
-A GitHub action maintained by Painted Wolf AI to certify contributions under the
-[Developer Certificate of Origin](https://developercertificate.org/).
+An immutable GitHub composite action that certifies original contributions under
+the [Developer Certificate of Origin](https://developercertificate.org/).
+It publishes `DCO-owned` on the captured pull request head or merge-group head.
 
-Copy [the caller workflow](examples/dco.yml) into `.github/workflows/dco.yml` in
-each consuming repository. Replace `REPLACE_WITH_REVIEWED_COMMIT_SHA` with a
-reviewed full commit SHA from this repository. Configure the branch ruleset to
-require `DCO-owned` from GitHub Actions after confirming a successful check on a
-ready pull request and a merge group. Preserve other required checks and the
-merge queue. Keep the existing DCO requirement during migration.
+## Install
 
-The workflow needs `contents: read`, `pull-requests: read`, `actions: read`, and
-`checks: write`. It runs this action's pinned code without checking out pull
-request code or reading artifacts. It requires Python 3 and `gh`; both are
-available on GitHub's Ubuntu runners. `workflow_run` provides a trusted
-follow-up for Dependabot events whose direct token can be read-only.
+Copy [the caller](examples/dco.yml) to `.github/workflows/dco.yml` and replace
+`REPLACE_WITH_REVIEWED_COMMIT_SHA` with a reviewed **full 40-character release SHA**.
+The caller executes the pinned action without checking out contribution code or
+loading artifacts. Set a required status check named `DCO-owned` from GitHub
+Actions after observing its check on a ready PR and, when used, a merge group.
+Keep your other required checks and merge-queue configuration.
 
-If the caller's CI has a different display name, update `workflow_run.workflows`.
-If its workflow filename differs from `ci.yml`, set the action's `ci-workflow`
-input. For a manual recheck, dispatch the caller workflow with `pull_request`
-set to a ready PR number.
+The initial supported environment is **GitHub.com, GitHub-hosted Ubuntu 24.04,
+and Python 3.11 or newer**. The action uses Python's standard-library HTTP client;
+`gh` is an operator tool, not a runtime dependency. GitHub Enterprise and
+self-hosted runners are not qualified release targets. Required token permissions
+are `contents: read`, `pull-requests: read`, `actions: read`, and `checks: write`.
 
-The checker reads every page of an immutable base-to-head comparison. It
-refuses incomplete inventories, changed PR identities, and ambiguous queue
-membership. Merge groups certify their original member PR commits using
-structured queue ancestry rather than GitHub's synthetic commit. Draft PRs,
-including PRs returned to draft during certification, receive no check writes.
+The default CI display name is `CI` and filename is `ci.yml`. If yours differ,
+change `workflow_run.workflows` in the caller and the action's `ci-workflow` input.
+A trusted completion of CI supplies the write-capable follow-up for Dependabot.
+Manual rechecks use the caller's `workflow_dispatch` with a ready PR number.
+Checks UI rerun requests are not an action input; dispatch the workflow instead.
 
-A sign-off must match the author or committer's name and email as a pair,
-ignoring case. Merge commits and GitHub-identified bot authors are exempt.
-There are no owner, member, or remediation exemptions. This action publishes
-the `DCO-owned` check on the exact captured head and fails closed on incomplete
-or changed evidence.
+## Certification
 
-The standard-library unittest suite covers pagination above 250 commits,
-identity matching, incomplete responses, merge group ancestry, trusted CI
-association, and draft/head/base races. CI uses the same suite as the original
-repository's verification infrastructure.
+Each result records repository, original PR identities, base/head SHAs, checker
+revision, and policy version. Commit inventories use complete immutable paginated
+comparisons, including contributions after position 250. Merge groups map their
+structured queue ancestry to original member PRs; synthetic queue sign-offs do
+not substitute for original certification. All open PR contexts sharing a head
+are evaluated together.
 
+A current ready target receives a pending check before scanning and a terminal
+update on that same check. Interrupted scans remain pending until another run
+rechecks them. Publication reconciles ambiguous creation and refuses to replace
+newer executions. Repository-wide serial caller execution with `queue: max` prevents delayed CI
+completions from cancelling current work. GitHub bounds the queued backlog to 100
+runs; operators must recheck dropped work after an exceptional event burst.
+Obsolete validated events do no work.
+Changed or unavailable evidence cannot produce success. Draft observations prevent
+further check writes, including drafts among shared-head PR contexts. GitHub state
+reads and check writes are separate API operations: a draft transition or repository
+change immediately after the final read cannot be made atomic with publication.
+
+Read the [policy](docs/policy.md), [trust model](docs/security-model.md),
+[operations guide](docs/operations.md), and [qualification procedure](docs/qualification.md)
+before enforcing the check across repositories.
+
+## Development
+
+Run `PYTHONPATH=scripts python3 -m unittest discover -s tests -v`.
+[Contributing](CONTRIBUTING.md) describes sign-offs and release review.
 Licensed under Apache-2.0.

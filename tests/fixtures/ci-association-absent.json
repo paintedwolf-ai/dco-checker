@@ -1,0 +1,16 @@
+{
+  "fixture_kind": "recorded-live-read-only",
+  "recorded_date": "2026-10-09",
+  "source": "https://github.com/paintedwolf-ai/paintedwolf-code/actions/runs/37975725272",
+  "workflow_run": {
+    "id": 37975725272,
+    "event": "pull_request",
+    "status": "completed",
+    "head_sha": "e0cb81d93e227e5231b30ab1006746ebb619c771",
+    "workflow_id": 371719995,
+    "pull_requests": [],
+    "repository": {
+      "full_name": "paintedwolf-ai/paintedwolf-code"
+    }
+  }
+}

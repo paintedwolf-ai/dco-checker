@@ -1,0 +1,40 @@
+{
+  "fixture_kind": "recorded-live-read-only",
+  "recorded_date": "2026-10-09",
+  "source": "https://github.com/paintedwolf-ai/paintedwolf-code/actions/runs/37982280935",
+  "workflow_run": {
+    "id": 37982280935,
+    "event": "pull_request",
+    "status": "completed",
+    "head_sha": "6ed46498b085bbc62be92a055e014473c419b93e",
+    "workflow_id": 371719995,
+    "pull_requests": [
+      {
+        "url": "https://api.github.com/repos/paintedwolf-ai/paintedwolf-code/pulls/424",
+        "id": 4804864229,
+        "number": 424,
+        "head": {
+          "ref": "ci/repository-owned-dco",
+          "sha": "492265e7c85f5066b707e105264fcc456fd8d0a1",
+          "repo": {
+            "id": 1389583107,
+            "url": "https://api.github.com/repos/paintedwolf-ai/paintedwolf-code",
+            "name": "paintedwolf-code"
+          }
+        },
+        "base": {
+          "ref": "main",
+          "sha": "d657897e9d3d0321310f17e62f90880e01ca1733",
+          "repo": {
+            "id": 1389583107,
+            "url": "https://api.github.com/repos/paintedwolf-ai/paintedwolf-code",
+            "name": "paintedwolf-code"
+          }
+        }
+      }
+    ],
+    "repository": {
+      "full_name": "paintedwolf-ai/paintedwolf-code"
+    }
+  }
+}
