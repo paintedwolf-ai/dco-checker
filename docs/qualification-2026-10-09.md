@@ -118,3 +118,14 @@ metadata refuse success. The updated suite has 79 tests, including malformed-par
 independent recomputation of published evidence digests; genuine cumulative
 queue qualification with retained webhook payloads remains required before
 release.
+
+
+Candidate `76373c28e004ca4d2b9728bcbcecf87c4cc262fb` passed genuine
+two-member cumulative qualification in
+[run 37990175214](https://github.com/paintedwolf-ai/dco-checker-qualification/actions/runs/37990175214).
+The retained webhook event base was the preceding synthetic entry, rather than
+the protected root. The audit included both original PRs 15 and 18, and the
+recorder independently reconstructed their full captured queue prefix and
+recomputed the digest shared by audit and required status. This establishes the
+new captured event behavior; it does not retroactively turn the earlier inferred
+payload into recorded evidence.
