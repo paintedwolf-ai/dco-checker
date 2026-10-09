@@ -33,3 +33,26 @@ release qualification.
 These observations do not establish genuine Dependabot behavior, merge-queue
 enforcement, or verification of a later squashed release SHA. Final release notes
 must link additional evidence and state any remaining qualification gaps.
+
+## Corrected candidate d07f07
+
+Candidate `d07f07c5df395ea5a625a0ae1fdaf08beffefec8` passed genuine
+two-member merge-group certification and the protected fixture queue merged both
+original PRs. The group target was
+`8eb49cf4568377945420a240619da0fca1db76e2`; original members were PRs 1 and 6.
+[Run 37985287486](https://github.com/paintedwolf-ai/dco-checker-qualification/actions/runs/37985287486)
+was independently recorded with exact downloaded SHA, caller source, structured
+execution provenance, run link, expected app identity, and successful result.
+
+The authentic fork passed a fresh manual certification with the corrected complete
+open-PR inventory in
+[run 37985409568](https://github.com/paintedwolf-ai/dco-checker-qualification/actions/runs/37985409568).
+A real attempt to enqueue unsigned PR 2 was rejected by the required `DCO-owned`
+check. These are hosted enforcement observations, not merely local test results.
+
+Further authentic fork CI completion exposed empty PR associations in GitHub's run
+metadata. The revised fallback treats a verified exact-head CI completion only as
+a wakeup, then establishes complete live PR authority and scans original commits.
+Its local tests replay recorded empty associations and reject incomplete or
+contradictory authority. This fallback revision requires subsequent hosted evidence
+and does not inherit a successful claim from the manual fork certification.

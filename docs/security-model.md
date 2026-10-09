@@ -13,8 +13,12 @@ responses, and sanitized error diagnostics.
 live PR and complete repository open-PR inventory, captures its original immutable
 commits across every same-head context, and validates state before final
 publication. `workflow_run` executes the default-branch caller and rereads the
-completed CI run, workflow identity, repository, and exact PR association; stale
-heads are ignored. `workflow_dispatch` is a maintainer-triggered default-branch
+completed CI run, workflow identity, repository, and exact captured run/head
+identity. Consistent nonempty PR associations are validated; an empty list is only
+a wakeup for fresh original-commit certification using the complete live open-PR
+inventory at that exact head. No live matching contexts means obsolete work;
+malformed or contradictory associations and incomplete inventory are rejected.
+Stale heads are ignored. `workflow_dispatch` is a maintainer-triggered default-branch
 recheck of current live PR state. `merge_group` executes the queue workflow and
 resolves original members using GraphQL queue ancestry, validating membership
 again after scanning. Missing or ambiguous evidence cannot certify a group.

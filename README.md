@@ -22,6 +22,10 @@ are `contents: read`, `pull-requests: read`, `actions: read`, and `checks: write
 The default CI display name is `CI` and filename is `ci.yml`. If yours differ,
 change `workflow_run.workflows` in the caller and the action's `ci-workflow` input.
 A trusted completion of CI supplies the write-capable follow-up for Dependabot.
+GitHub may omit CI PR associations, especially for forks; the verified exact CI
+head then wakes a fresh certification using the complete live open-PR inventory.
+Empty associations do not certify commits by themselves. Contradictory or malformed
+associations are rejected.
 Manual rechecks use the caller's `workflow_dispatch` with a ready PR number.
 Checks UI rerun requests are not an action input; dispatch the workflow instead.
 

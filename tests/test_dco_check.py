@@ -198,24 +198,63 @@ class ExecutionContracts(unittest.TestCase):
         self.assertEqual(github.checks[-1]['status'], 'in_progress')
         self.assertEqual(len(github.writes), 1)
 
-    def test_recorded_github_ci_associations_fail_closed(self):
-        for fixture in (Path(__file__).parent / 'fixtures').glob('*.json'):
-            content = json.loads(fixture.read_text())
-            if 'workflow_run' not in content:
-                continue
-            recorded = content['workflow_run']
-            github = Consumer()
-            github.repository = recorded['repository']['full_name']
-            github.ci = copy.deepcopy(recorded)
-            original_api = github.api
-            def fixture_api(path, payload=None, method=None):
-                if '/actions/workflows/' in path:
-                    return {'id': recorded['workflow_id']}
-                return original_api(path, payload, method)
-            github.api = fixture_api
-            config = Config(sha(900), 10, 1, f'https://github.com/{github.repository}/actions/runs/10')
-            with self.subTest(fixture=fixture.name), redirect_stdout(io.StringIO()):
-                self.assertEqual(run(github, 'workflow_run', {'workflow_run': recorded}, config), 1)
+    def recorded_ci(self, name, members=None):
+        fixture = Path(__file__).parent / 'fixtures' / name
+        recorded = json.loads(fixture.read_text())['workflow_run']
+        github = Consumer(members)
+        github.repository = recorded['repository']['full_name']
+        github.ci = copy.deepcopy(recorded)
+        original_api = github.api
+        def fixture_api(path, payload=None, method=None):
+            if '/actions/workflows/' in path:
+                return {'id': recorded['workflow_id']}
+            return original_api(path, payload, method)
+        github.api = fixture_api
+        return github, recorded
+
+    def execute_recorded(self, github, recorded):
+        config = Config(sha(900), 10, 1, f'https://github.com/{github.repository}/actions/runs/10')
+        with redirect_stdout(io.StringIO()):
+            return run(github, 'workflow_run', {'workflow_run': recorded}, config)
+
+    def test_recorded_contradictory_ci_association_cannot_publish(self):
+        github, recorded = self.recorded_ci('historical-ci-association-refreshed.json')
+        self.assertEqual(self.execute_recorded(github, recorded), 1)
+        self.assertEqual(github.writes, [])
+
+    def test_recorded_empty_ci_association_certifies_complete_live_head_contexts(self):
+        recorded = json.loads((Path(__file__).parent / 'fixtures/ci-association-absent.json').read_text())['workflow_run']
+        github, recorded = self.recorded_ci('ci-association-absent.json',
+            [pull(1, head=recorded['head_sha']), pull(2, head=recorded['head_sha'], base=sha(1001))])
+        self.assertEqual(self.execute_recorded(github, recorded), 0)
+        self.assertEqual(github.checks[-1]['head_sha'], recorded['head_sha'])
+        self.assertIn('PR #2', github.checks[-1]['output']['summary'])
+        github, recorded = self.recorded_ci('ci-association-absent.json',
+            [pull(1, head=recorded['head_sha']), pull(2, head=recorded['head_sha'], base=sha(1001))])
+        github.inventory[2] = [commit(recorded['head_sha'], signed=False)]
+        self.assertEqual(self.execute_recorded(github, recorded), 1)
+        self.assertEqual(github.checks[-1]['conclusion'], 'failure')
+
+    def test_recorded_empty_ci_association_skips_obsolete_head_and_draft(self):
+        github, recorded = self.recorded_ci('ci-association-absent.json')
+        self.assertEqual(self.execute_recorded(github, recorded), 0)
+        self.assertEqual(github.writes, [])
+        github, recorded = self.recorded_ci('ci-association-absent.json', [pull(1, head=recorded['head_sha'], draft=True)])
+        self.assertEqual(self.execute_recorded(github, recorded), 0)
+        self.assertEqual(github.writes, [])
+
+    def test_recorded_empty_ci_association_requires_complete_inventory_and_trusted_run(self):
+        recorded = json.loads((Path(__file__).parent / 'fixtures/ci-association-absent.json').read_text())['workflow_run']
+        github, recorded = self.recorded_ci('ci-association-absent.json', [pull(1, head=recorded['head_sha'])])
+        with patch.object(github, 'contexts', side_effect=Refused('Incomplete open PR inventory')):
+            self.assertEqual(self.execute_recorded(github, recorded), 1)
+        self.assertEqual(github.writes, [])
+        for field, value in [('repository', {'full_name': 'foreign/repo'}), ('event', 'push'),
+                             ('head_sha', sha(888)), ('pull_requests', None), ('id', 123)]:
+            with self.subTest(field=field):
+                github, recorded = self.recorded_ci('ci-association-absent.json', [pull(1, head=recorded['head_sha'])])
+                github.ci[field] = value
+                self.assertEqual(self.execute_recorded(github, recorded), 1)
                 self.assertEqual(github.writes, [])
 
 

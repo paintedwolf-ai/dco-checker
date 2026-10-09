@@ -28,25 +28,40 @@ class Config:
             raise Refused("CI workflow must be a workflow filename")
 
 
-def trusted_run(github, event, config):
+def trusted_run_head(github, event, config):
     captured = event["workflow_run"]
-    run = github.api(f"repos/{github.repository}/actions/runs/{int(captured['id'])}")
+    if type(captured["id"]) is not int or captured["id"] <= 0:
+        raise Refused("Workflow run must have a positive captured run ID")
+    run = github.api(f"repos/{github.repository}/actions/runs/{captured['id']}")
     workflow = github.api(f"repos/{github.repository}/actions/workflows/{config.ci_workflow}")
-    if (run["repository"]["full_name"] != github.repository or run["workflow_id"] != workflow["id"] or
-        run["event"] != "pull_request" or run["status"] != "completed" or
-        run["head_sha"] != captured["head_sha"] or run["workflow_id"] != captured["workflow_id"]):
+    if (type(run["id"]) is not int or type(run["workflow_id"]) is not int or
+        type(captured["workflow_id"]) is not int or type(workflow["id"]) is not int or
+        run["workflow_id"] <= 0 or run["id"] != captured["id"] or run["repository"]["full_name"] != github.repository or
+        run["workflow_id"] != workflow["id"] or run["event"] != "pull_request" or run["status"] != "completed" or
+        run["head_sha"] != captured["head_sha"] or run["workflow_id"] != captured["workflow_id"] or
+        not isinstance(run["head_sha"], str) or not SHA.fullmatch(run["head_sha"])):
         raise Refused("Workflow run is not captured repository CI for a PR")
     associations = run["pull_requests"]
-    if len(associations) != 1 or associations != captured["pull_requests"]:
-        raise Refused("Workflow run association is absent or ambiguous")
-    association = associations[0]
-    if association["head"]["sha"] != run["head_sha"]:
-        raise Refused("Workflow run does not identify the associated PR head")
-    current = github.pull(association["number"])
-    if current["headRefOid"] != run["head_sha"]:
-        raise Obsolete("CI completion belongs to an obsolete PR head")
-    # A base retarget with the same head is new evidence and must be evaluated live.
-    return current
+    if not isinstance(associations, list) or associations != captured["pull_requests"]:
+        raise Refused("Workflow run association metadata is malformed or changed")
+    if associations:
+        if len(associations) != 1:
+            raise Refused("Workflow run PR association is ambiguous")
+        association = associations[0]
+        if type(association["number"]) is not int or association["number"] <= 0:
+            raise Refused("Workflow run association has an invalid PR number")
+        if association["head"]["sha"] != run["head_sha"]:
+            raise Refused("Workflow run contradicts the associated PR head")
+        current = github.pull(association["number"])
+        if current["headRefOid"] != run["head_sha"] or current["state"] != "OPEN":
+            raise Obsolete("CI completion belongs to an obsolete PR generation")
+        if current["isDraft"]:
+            raise Draft("Draft PR left untouched")
+    # CI completion is only a trusted wake-up, never certification of DCO.
+    # GitHub can omit PR associations for real fork/bot runs. Its immutable
+    # run head plus the complete live repository PR inventory identifies every
+    # current context that can consume this SHA's check without branch heuristics.
+    return run["head_sha"]
 
 
 def select(github, event_name, event, config):
@@ -65,10 +80,13 @@ def select(github, event_name, event, config):
                 raise Draft("Queued PR returned to draft; check left untouched")
             if current != member:
                 raise Obsolete("Queued PR no longer matches captured queue generation")
+    elif event_name == "workflow_run":
+        sha = trusted_run_head(github, event, config)
+        members = github.contexts(sha)
+        if not members:
+            raise Obsolete("CI head has no current open PR contexts")
     else:
-        if event_name == "workflow_run":
-            current = trusted_run(github, event, config)
-        elif event_name == "pull_request_target":
+        if event_name == "pull_request_target":
             captured = event["pull_request"]
             current = github.pull(captured["number"])
             if current["headRefOid"] != captured["head"]["sha"]:

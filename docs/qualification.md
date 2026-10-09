@@ -66,7 +66,8 @@ Record the actual trigger and immutable SHAs for each scenario:
 | Publisher boundary | Ruleset app binding plus reviewed publisher workflow controls |
 
 Local execution tests exercise duplicate delivery, delayed fork/Dependabot-shaped
-payloads, interruption, API failure, same-head retargeting, shared-head contexts,
+payloads (including genuine recorded empty fork associations), interruption, API
+failure, same-head retargeting, shared-head contexts,
 ambiguous creation, supersession, and multi-member queue success/failure. These are
 deterministic contracts, not claims that GitHub delivered authentic external events.
 Some scenarios require operator orchestration beyond the case creator: create a
