@@ -52,6 +52,12 @@ before enforcing the check across repositories.
 
 ## Development
 
-Run `PYTHONPATH=scripts python3 -m unittest discover -s tests -v`.
+On Python 3.11+, install development dependencies with
+`python3 -m pip install -r requirements-dev.txt`, then run
+`PYTHONPATH=scripts python3 -m unittest discover -s tests -v`.
+The pinned PyYAML dependency validates workflow YAML only; it is not installed or
+imported by the action. Semantic tests validate modern GitHub concurrency queues,
+including job sections, alongside actionlint's narrowly scoped accommodation for
+its unsupported `queue` key.
 [Contributing](CONTRIBUTING.md) describes sign-offs and release review.
 Licensed under Apache-2.0.
