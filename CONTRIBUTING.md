@@ -5,7 +5,8 @@ its author or committer. Use `git commit --signoff`; sign only if you can certif
 the [DCO](https://developercertificate.org/). Squash merge messages must also retain
 a matching sign-off for the resulting commit.
 
-Run `PYTHONPATH=scripts python3 -m unittest discover -s tests -v` on Python 3.11+
+Install `requirements-dev.txt` on Python 3.11+, then run
+`PYTHONPATH=scripts python3 -m unittest discover -s tests -v`
 and inspect CI. Tests must exercise meaningful policy, evidence, transport, and
 publication boundaries. Production certification never executes contribution code.
 Keep runtime dependencies in Python's standard library.

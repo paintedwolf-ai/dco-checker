@@ -23,7 +23,7 @@ class HostedEvidenceTests(unittest.TestCase):
 
     def test_actual_run_target_app_and_evidence_are_required(self):
         self.assertEqual(self.validate([self.check]), [])
-        for key, value in [('head_sha', 'c'*40), ('details_url', 'https://github.com/org/repo/actions/runs/43'),
+        for key, value in [('head_sha', 'c'*40), ('external_id', 'dco:v2:43:1:'+'b'*64),
                            ('app', {'id': 123}), ('conclusion', 'failure'), ('external_id', '')]:
             with self.subTest(key=key):
                 self.assertTrue(self.validate([dict(self.check, **{key: value})]))

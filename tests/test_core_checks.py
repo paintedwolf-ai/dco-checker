@@ -53,7 +53,7 @@ class ChecksTests(unittest.TestCase):
         check.start()
         api.patch_error = True
         check.finish("failure", "missing sign-off")
-        self.assertEqual(api.checks[0]["output"]["summary"], "missing sign-off")
+        self.assertTrue(api.checks[0]["output"]["summary"].endswith("missing sign-off"))
 
     def test_newer_execution_blocks_obsolete_publication(self):
         api = API()
@@ -100,3 +100,20 @@ class ChecksTests(unittest.TestCase):
         duplicate.start()
         self.assertEqual(duplicate.check["status"], "completed")
         self.assertEqual(api.posts, 1)
+
+    def test_pending_and_terminal_output_identify_actual_execution(self):
+        import json
+        api = API()
+        check = publisher(api)
+        check.start()
+        pending = api.checks[0]["output"]
+        self.assertIn("[Certification run](https://github.com/org/repo/actions/runs/10)", pending["summary"])
+        record = json.loads(pending["text"].removeprefix("```json\n").removesuffix("\n```"))
+        self.assertEqual(record["external_id"], check.external_id)
+        self.assertEqual(record["run_id"], 10)
+        self.assertEqual(record["checker_revision"], "b" * 40)
+        # Mimic GitHub's suite/details URL rewriting; explicit provenance survives.
+        api.checks[0]["details_url"] = "https://github.com/org/repo/runs/123"
+        check.finish("success", "certified")
+        self.assertEqual(api.checks[0]["output"]["text"], pending["text"])
+        self.assertIn("actions/runs/10", api.checks[0]["output"]["summary"])

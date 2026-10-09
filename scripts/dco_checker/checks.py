@@ -1,6 +1,7 @@
 """A pending check identifies each execution; ambiguous writes are reconciled."""
+import json
 import re
-from . import CHECK_NAME, Obsolete, Refused
+from . import CHECK_NAME, Obsolete, POLICY_VERSION, Refused
 from .transport import APIError
 
 EXTERNAL = re.compile(r"^dco:v2:(\d+):(\d+):([0-9a-f]{64})$")
@@ -11,6 +12,18 @@ class Publisher:
         self.github, self.sha, self.evidence, self.config = github, sha, evidence, config
         self.external_id = f"dco:v2:{config.run_id}:{config.attempt}:{evidence['digest']}"
         self.check = None
+
+    def output(self, title, summary):
+        # GitHub Actions may attach custom checks to an existing app suite and
+        # rewrite details_url. Correlate execution using our explicit output,
+        # never the suite workflow or GitHub-generated check details link.
+        provenance = {"run_url": self.config.run_url, "run_id": self.config.run_id,
+                      "attempt": self.config.attempt, "external_id": self.external_id,
+                      "evidence_digest": self.evidence["digest"],
+                      "checker_revision": self.config.revision, "policy_version": POLICY_VERSION}
+        return {"title": title,
+                "summary": f"[Certification run]({self.config.run_url}) · attempt {self.config.attempt}\n\n" + summary,
+                "text": "```json\n" + json.dumps(provenance, sort_keys=True) + "\n```"}
 
     def inventory(self):
         checks, page, total = [], 1, None
@@ -60,7 +73,7 @@ class Publisher:
             return
         payload = {"name": CHECK_NAME, "head_sha": self.sha, "external_id": self.external_id,
                    "status": "in_progress", "details_url": self.config.run_url,
-                   "output": {"title": "DCO certification in progress", "summary": "Evaluating original commits against policy 2 and captured live PR contexts."}}
+                   "output": self.output("DCO certification in progress", "Evaluating original commits against policy 2 and captured live PR contexts.")}
         try:
             self.check = self.github.api(f"repos/{self.github.repository}/check-runs", payload, "POST")
             if not isinstance(self.check, dict) or type(self.check.get("id")) is not int:
@@ -79,7 +92,7 @@ class Publisher:
         if current is None or current["id"] != self.check["id"]:
             raise Refused("Pending check identity was lost")
         payload = {"status": "completed", "conclusion": conclusion,
-                   "output": {"title": "DCO certified" if conclusion == "success" else "DCO certification failed", "summary": summary}}
+                   "output": self.output("DCO certified" if conclusion == "success" else "DCO certification failed", summary)}
         path = f"repos/{self.github.repository}/check-runs/{self.check['id']}"
         try:
             self.github.api(path, payload, "PATCH")
@@ -88,7 +101,7 @@ class Publisher:
                 raise
             recovered = self.github.api(path)
             self.validate(recovered)
-            if recovered.get("status") == "completed" and recovered.get("conclusion") == conclusion and recovered.get("output", {}).get("summary") == summary:
+            if recovered.get("status") == "completed" and recovered.get("conclusion") == conclusion and recovered.get("output", {}).get("summary") == payload["output"]["summary"] and recovered.get("output", {}).get("text") == payload["output"]["text"]:
                 return
             # PATCH is idempotent for this identified check, but verify supersession first.
             self.reconcile()

@@ -29,7 +29,8 @@ def verify(run, jobs, checks, *, repository, run_id, head, conclusion, app_id, a
         errors.append("no composite certification step appears in recorded jobs")
     run_url = run.get("html_url")
     candidates = [check for check in checks if check.get("name") == "DCO-owned"
-                  and check.get("head_sha") == head and check.get("details_url") == run_url]
+                  and check.get("head_sha") == head
+                  and str(check.get("external_id", "")).startswith(f"dco:v2:{run_id}:{run.get('run_attempt', 1)}:")]
     if not candidates:
         errors.append("no DCO-owned check belongs to this exact run and target head")
     for check in candidates:
@@ -57,6 +58,7 @@ def main():
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--action-sha", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--allow-legacy-missing-run-link", action="store_true", help="Candidate-only evidence for the pre-link implementation; never use for release qualification")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository):
         parser.error("repository must be owner/name")
@@ -70,7 +72,8 @@ def main():
                               (f"commits/{args.head}/check-runs", "check_runs", checks)]:
         page = 1
         while True:
-            batch = api(f"{prefix}/{path}?per_page=100&page={page}")[key]
+            query = f"per_page=100&page={page}" + ("&filter=all" if key == "check_runs" else "")
+            batch = api(f"{prefix}/{path}?{query}")[key]
             target.extend(batch)
             if len(batch) < 100:
                 break
@@ -79,13 +82,37 @@ def main():
     source = base64.b64decode(workflow["content"]).decode("utf-8")
     errors = verify(run, jobs, checks, repository=args.repository, run_id=args.run_id,
                     head=args.head, conclusion=args.expected_conclusion, app_id=args.app_id, action_sha=args.action_sha)
+    logs = subprocess.run(["gh", "run", "view", str(args.run_id), "--repo", args.repository, "--log"],
+                          capture_output=True, text=True, check=True, timeout=60).stdout
+    if f"Download action repository 'paintedwolf-ai/dco-checker@{args.action_sha}' (SHA:{args.action_sha})" not in logs:
+        errors.append("runner logs do not attest downloading the requested immutable action SHA")
+    identified = [check for check in checks if str(check.get("external_id", "")).startswith(f"dco:v2:{args.run_id}:{run.get('run_attempt', 1)}:")]
+    if not args.allow_legacy_missing_run_link and any(run["html_url"] not in check.get("output", {}).get("summary", "") for check in identified):
+        errors.append("published summary lacks the explicit certification workflow run link")
+    if not args.allow_legacy_missing_run_link:
+        for check in identified:
+            try:
+                text = check["output"]["text"]
+                if not text.startswith("```json\n") or not text.endswith("\n```"):
+                    raise ValueError("not fenced JSON")
+                provenance = json.loads(text[8:-4])
+                expected = {"run_url": run["html_url"], "run_id": args.run_id,
+                            "attempt": run.get("run_attempt", 1), "external_id": check["external_id"],
+                            "checker_revision": args.action_sha, "policy_version": "2",
+                            "evidence_digest": check["external_id"].rsplit(":", 1)[-1]}
+                if any(str(provenance.get(key)) != str(value) for key, value in expected.items()):
+                    errors.append("published execution provenance differs from the recorded action/run/evidence")
+            except (KeyError, TypeError, ValueError):
+                errors.append("published check lacks valid structured execution provenance")
     if f"paintedwolf-ai/dco-checker@{args.action_sha}" not in source:
         errors.append("immutable caller workflow does not pin the requested action revision")
     document = {"schema_version": 1, "qualification_kind": "hosted-token-bearing",
                 "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "scenario": args.scenario, "action_sha": args.action_sha,
                 "target_head": args.head, "expected_conclusion": args.expected_conclusion,
-                "run": run, "jobs": jobs, "checks": checks, "caller_workflow": {"ref": run["head_sha"], "blob_sha": workflow["sha"], "source": source}, "errors": errors,
+                "release_eligible": not args.allow_legacy_missing_run_link and not errors,
+                "legacy_missing_run_link_allowed": args.allow_legacy_missing_run_link,
+                "runner_logs": logs, "run": run, "jobs": jobs, "checks": checks, "caller_workflow": {"ref": run["head_sha"], "blob_sha": workflow["sha"], "source": source}, "errors": errors,
                 "limitations": ["this record does not demonstrate required-check ruleset enforcement"]}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(document, indent=2) + "\n")
