@@ -51,6 +51,11 @@ No third-party Python package is required at runtime. Review GitHub API and host
 runner changes as part of releases. Retain Actions logs and qualification JSON with
 release records according to repository retention settings.
 
+A rebuilt merge group needs fresh certification of its complete prefix back to
+the current protected branch head. Removing a queue member does not make an old
+dependent synthetic head eligible: its surviving suffix cannot certify an
+absent contribution. Let GitHub rebuild the group and inspect the new audit.
+
 Pending statuses and audit checks indicate incomplete certification, not approval. Inspect the linked
 run and dispatch a recheck after restoring API availability. Infrastructure failures
 are distinct from rejected sign-offs. Never treat a successful unrelated workflow job as DCO evidence. Require the

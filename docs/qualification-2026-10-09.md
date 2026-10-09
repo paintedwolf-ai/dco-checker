@@ -99,3 +99,21 @@ The candidate's hosted CI passed 70 behavior and workflow contracts on Python
 were verified after merging. Candidate evidence does not certify that different
 squashed SHA. Final release evidence must use the exact released SHA and preserve
 the additional long-inventory, draft, bot, and queue observations.
+
+
+## Cumulative queue boundary correction
+
+Negative qualification of the canonical candidate exposed a stale cumulative
+queue group whose Git ancestry still contained unsigned PR 11, while its audit
+listed only signed PR 13. The group was rebuilt and did not merge. The original
+webhook payload was not retained; its event base is inferred from immutable Git
+parents and audit behavior, and is not presented as a captured field. The
+recorded regression fixture labels those inferences and replay assumptions.
+
+Certification now captures the protected branch head with the queue inventory
+and traverses every prefix to that root. The event base must occur on that
+ancestry but does not terminate traversal. Immutable Git parent edges must
+corroborate queue metadata. Root changes, withdrawn prefixes, or rewritten
+metadata refuse success. The updated suite has 77 tests; genuine cumulative
+queue qualification with retained webhook payloads remains required before
+release.

@@ -1,10 +1,17 @@
 """Live authority snapshots and immutable, complete commit inventories."""
 import re
+from dataclasses import dataclass
 from . import Refused
 
 PR_FIELDS = "number headRefOid baseRefOid isDraft state"
 PAGE = "pageInfo { hasNextPage endCursor } totalCount"
 SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+@dataclass(frozen=True)
+class QueueInventory:
+    root: str
+    entries: list
 
 
 def snapshot(value):
@@ -53,7 +60,7 @@ class GitHub:
         return self.transport.request(path, payload, method)
 
     def query(self, body, **variables):
-        kinds = {"owner": "String!", "name": "String!", "number": "Int!", "branch": "String!", "cursor": "String"}
+        kinds = {"owner": "String!", "name": "String!", "number": "Int!", "branch": "String!", "ref": "String!", "cursor": "String"}
         declaration = ",".join(f"${key}:{kind}" for key, kind in kinds.items() if "$" + key in body or key in ("owner", "name"))
         result = self.api("graphql", {"query": "query(" + declaration + "){repository(owner:$owner,name:$name){" + body + "}}",
             "variables": {"owner": self.owner, "name": self.name, **variables}})
@@ -126,10 +133,19 @@ class GitHub:
         return commits
 
     def queue(self, branch):
-        entries, cursor, total = [], None, None
+        entries, cursor, total, root = [], None, None, None
         while True:
-            queue = self.query("mergeQueue(branch:$branch){entries(first:100,after:$cursor){" + PAGE +
-                " nodes{id baseCommit{oid} headCommit{oid} pullRequest{" + PR_FIELDS + "}}}}", branch=branch, cursor=cursor)["mergeQueue"]
+            response = self.query("baseRef:ref(qualifiedName:$ref){target{... on Commit{oid}}} " +
+                "mergeQueue(branch:$branch){entries(first:100,after:$cursor){" + PAGE +
+                " nodes{id baseCommit{oid} headCommit{oid} pullRequest{" + PR_FIELDS + "}}}}",
+                branch=branch, ref="refs/heads/" + branch, cursor=cursor)
+            current_root = ((response.get("baseRef") or {}).get("target") or {}).get("oid")
+            if not isinstance(current_root, str) or not SHA.fullmatch(current_root):
+                raise Refused("Protected branch root is unavailable")
+            if root is not None and current_root != root:
+                raise Refused("Protected branch root changed during queue pagination")
+            root = current_root
+            queue = response["mergeQueue"]
             if queue is None:
                 raise Refused("Merge queue is unavailable")
             connection = queue["entries"]
@@ -137,6 +153,9 @@ class GitHub:
             if total is not None and total != connection["totalCount"]:
                 raise Refused("Merge queue changed during pagination")
             total = connection["totalCount"]
+            for entry in connection["nodes"]:
+                if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not entry["id"]:
+                    raise Refused("Malformed merge queue entry identity")
             entries += connection["nodes"]
             if len(entries) > total or len({entry["id"] for entry in entries}) != len(entries):
                 raise Refused("Repeated merge queue page")
@@ -145,19 +164,38 @@ class GitHub:
                 break
         if len(entries) != total:
             raise Refused("Incomplete merge queue inventory")
-        return entries
+        return QueueInventory(root, entries)
+
+    def queue_members(self, inventory, event_base, head):
+        entries, members = queue_chain(inventory, event_base, head)
+        # Queue metadata may be rebuilt while an obsolete synthetic commit is
+        # still visible. Immutable Git ancestry must corroborate every edge.
+        for entry in entries:
+            oid, base = entry["headCommit"]["oid"], entry["baseCommit"]["oid"]
+            commit = self.api(f"repos/{self.repository}/git/commits/{oid}")
+            parents = commit.get("parents") if isinstance(commit, dict) else None
+            if (not isinstance(commit, dict) or commit.get("sha") != oid or not isinstance(parents, list) or not parents or
+                any(not isinstance(parent, dict) or not isinstance(parent.get("sha"), str) or
+                    not SHA.fullmatch(parent["sha"]) for parent in parents) or
+                len({parent["sha"] for parent in parents}) != len(parents) or parents[0]["sha"] != base):
+                raise Refused("Synthetic commit ancestry contradicts merge queue authority")
+        return members
 
 
-def queue_members(entries, base, head):
+def queue_chain(inventory, event_base, head):
+    if not all(isinstance(oid, str) and SHA.fullmatch(oid) for oid in (inventory.root, event_base, head)):
+        raise Refused("Malformed merge group ancestry identity")
+    if event_base == head:
+        raise Refused("Merge group has no interval beyond its event base")
     by_head = {}
-    for entry in entries:
+    for entry in inventory.entries:
         if entry["headCommit"] is not None:
             oid = entry["headCommit"]["oid"]
-            if oid in by_head:
+            if not isinstance(oid, str) or not SHA.fullmatch(oid) or oid in by_head:
                 raise Refused("Ambiguous merge queue commit")
             by_head[oid] = entry
-    members, visited = [], set()
-    while head != base:
+    members, chain, visited = [], [], set()
+    while head != inventory.root:
         if head in visited or head not in by_head:
             raise Refused("Merge group cannot be mapped to original PRs")
         visited.add(head)
@@ -165,7 +203,12 @@ def queue_members(entries, base, head):
         if entry["baseCommit"] is None or entry["pullRequest"] is None:
             raise Refused("Incomplete merge queue entry")
         members.append(snapshot(entry["pullRequest"]))
+        chain.append(entry)
         head = entry["baseCommit"]["oid"]
+        if not isinstance(head, str) or not SHA.fullmatch(head):
+            raise Refused("Malformed merge queue base commit")
+    if event_base not in visited | {inventory.root}:
+        raise Refused("Event base is outside the rooted merge group ancestry")
     if not members or len({pr["number"] for pr in members}) != len(members):
         raise Refused("Empty or duplicate merge-group membership")
-    return list(reversed(members))
+    return list(reversed(chain)), list(reversed(members))

@@ -23,8 +23,14 @@ inventory at that exact head. No live matching contexts means obsolete work;
 malformed or contradictory associations and incomplete inventory are rejected.
 Stale heads are ignored. `workflow_dispatch` is a maintainer-triggered default-branch
 recheck of current live PR state. `merge_group` executes the queue workflow and
-resolves original members using GraphQL queue ancestry, validating membership
-again after scanning. Missing or ambiguous evidence cannot certify a group.
+snapshots the protected branch head with the complete GraphQL queue inventory,
+then follows the synthetic head through every queued prefix to that branch head.
+The event base is an ancestry checkpoint and may already contain earlier queued
+contributions. Every structured edge must agree with the immutable Git commit’s
+first parent. All original members are evaluated, and the protected root and
+membership are revalidated before success. A withdrawn prefix, rewritten edge,
+or changed root refuses certification. Missing or ambiguous evidence cannot
+certify a group.
 
 Use the supplied serial caller and maintain the DCO workflow on the default and
 queue base branch. Manual dispatch should target the default branch. Review all

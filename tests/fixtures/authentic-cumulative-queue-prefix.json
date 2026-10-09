@@ -1,0 +1,161 @@
+{
+  "provenance": {
+    "repository": "paintedwolf-ai/dco-checker-qualification",
+    "recorded_at": "2026-10-09",
+    "source": "GitHub GraphQL queue captures and REST Git commit/PR reads from authentic hosted qualification",
+    "limitations": [
+      "Initial capture retained headCommit but not baseCommit; initial edge bases and event base are inferred from immutable Git first parents, not a retained webhook payload.",
+      "PR metadata was read after hosted execution, when signed PRs were merged. OPEN state and original-base snapshots used in replay are explicit test assumptions, not newly recorded API responses."
+    ]
+  },
+  "protected_root": "9944a0fd156877890bb18fc5823c49153b221183",
+  "initial_queue_capture": {
+    "data": {
+      "repository": {
+        "mergeQueue": {
+          "entries": {
+            "nodes": [
+              {
+                "id": "MQE_lQDOVC9N1c8AAAABHm_4zc4ABJfMzgMwrLw",
+                "state": "AWAITING_CHECKS",
+                "position": 1,
+                "pullRequest": {
+                  "number": 11
+                },
+                "headCommit": {
+                  "oid": "00a8efa15f62d08d915c5fa86b1ea0d581794120"
+                }
+              },
+              {
+                "id": "MQE_lQDOVC9N1c8AAAABHnAKJM4ABJfMzgMwrL4",
+                "state": "AWAITING_CHECKS",
+                "position": 2,
+                "pullRequest": {
+                  "number": 13
+                },
+                "headCommit": {
+                  "oid": "b6affb662f565e56f2eddde2cb09663eb773e53e"
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "rebuilt_queue_capture": {
+    "data": {
+      "repository": {
+        "mergeQueue": {
+          "entries": {
+            "nodes": [
+              {
+                "id": "MQE_lQDOVC9N1c8AAAABHnAKJM4ABJfMzgMwrL4",
+                "state": "AWAITING_CHECKS",
+                "position": 1,
+                "pullRequest": {
+                  "number": 13
+                },
+                "headCommit": {
+                  "oid": "7646db89d8b89c7815807072fe4233fa8c5185db"
+                },
+                "baseCommit": {
+                  "oid": "9944a0fd156877890bb18fc5823c49153b221183"
+                }
+              },
+              {
+                "id": "MQE_lQDOVC9N1c8AAAABHnBgrs4ABJfMzgMwreI",
+                "state": "AWAITING_CHECKS",
+                "position": 2,
+                "pullRequest": {
+                  "number": 16
+                },
+                "headCommit": {
+                  "oid": "bec60994d7c7507d504495deb5bfbc3079cb71af"
+                },
+                "baseCommit": {
+                  "oid": "7646db89d8b89c7815807072fe4233fa8c5185db"
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "immutable_commits": {
+    "00a8efa15f62d08d915c5fa86b1ea0d581794120": {
+      "sha": "00a8efa15f62d08d915c5fa86b1ea0d581794120",
+      "parents": [
+        {
+          "sha": "9944a0fd156877890bb18fc5823c49153b221183"
+        }
+      ]
+    },
+    "b6affb662f565e56f2eddde2cb09663eb773e53e": {
+      "sha": "b6affb662f565e56f2eddde2cb09663eb773e53e",
+      "parents": [
+        {
+          "sha": "00a8efa15f62d08d915c5fa86b1ea0d581794120"
+        }
+      ]
+    },
+    "7646db89d8b89c7815807072fe4233fa8c5185db": {
+      "sha": "7646db89d8b89c7815807072fe4233fa8c5185db",
+      "parents": [
+        {
+          "sha": "9944a0fd156877890bb18fc5823c49153b221183"
+        }
+      ]
+    },
+    "bec60994d7c7507d504495deb5bfbc3079cb71af": {
+      "sha": "bec60994d7c7507d504495deb5bfbc3079cb71af",
+      "parents": [
+        {
+          "sha": "7646db89d8b89c7815807072fe4233fa8c5185db"
+        }
+      ]
+    }
+  },
+  "recorded_pull_requests": {
+    "11": {
+      "number": 11,
+      "state": "open",
+      "merged": false,
+      "draft": false,
+      "base": {
+        "ref": "main",
+        "sha": "e9e396cfce1c302d7a8482db9cee825635db574d"
+      },
+      "head": {
+        "sha": "24d6fb29b2993dae0956c4a1cfce321148ab0c2f"
+      }
+    },
+    "13": {
+      "number": 13,
+      "state": "closed",
+      "merged": true,
+      "draft": false,
+      "base": {
+        "ref": "main",
+        "sha": "e9e396cfce1c302d7a8482db9cee825635db574d"
+      },
+      "head": {
+        "sha": "1bc36ac02a0b85a25566ff408f114e18555ee5ee"
+      }
+    },
+    "16": {
+      "number": 16,
+      "state": "closed",
+      "merged": true,
+      "draft": false,
+      "base": {
+        "ref": "main",
+        "sha": "9944a0fd156877890bb18fc5823c49153b221183"
+      },
+      "head": {
+        "sha": "5c9d6254629dc7a0351d7c098b885c7be297931a"
+      }
+    }
+  }
+}

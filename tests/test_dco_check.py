@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from dco_checker import Refused
 from dco_checker.engine import Config, run
-from dco_checker.evidence import GitHub
+from dco_checker.evidence import GitHub, QueueInventory, queue_chain
 from dco_checker.transport import APIError
 
 
@@ -45,7 +45,9 @@ class Consumer:
     def commits(self, expected):
         return copy.deepcopy(self.inventory[expected['number']])
     def queue(self, branch):
-        return copy.deepcopy(self.entries)
+        return QueueInventory(sha(1000), copy.deepcopy(self.entries))
+    def queue_members(self, inventory, base, head):
+        return queue_chain(inventory, base, head)[1]
     def api(self, path, payload=None, method=None):
         if '/actions/runs/' in path:
             return copy.deepcopy(self.ci)
@@ -150,6 +152,25 @@ class ExecutionContracts(unittest.TestCase):
         self.assertEqual(self.execute(github, 'merge_group', payload, run_id=11), 1)
         self.assertIn('PR #2', github.checks[-1]['output']['summary'])
 
+    def test_queue_event_base_is_checkpoint_not_unsigned_prefix_exemption(self):
+        github = Consumer([pull(), pull(2)])
+        github.entries = [dict(id='one', baseCommit={'oid': sha(1000)}, headCommit={'oid': sha(2001)}, pullRequest=pull()),
+                          dict(id='two', baseCommit={'oid': sha(2001)}, headCommit={'oid': sha(2002)}, pullRequest=pull(2))]
+        github.inventory[1] = [commit(sha(1), signed=False)]
+        payload = {'merge_group': {'base_ref': 'refs/heads/main', 'base_sha': sha(2001), 'head_sha': sha(2002)}}
+        self.assertEqual(self.execute(github, 'merge_group', payload), 1)
+        self.assertEqual(github.statuses[-1]['state'], 'failure')
+        self.assertIn('PR #1', github.checks[-1]['output']['summary'])
+
+    def test_queue_root_change_after_scan_cannot_publish_success(self):
+        github = Consumer()
+        entry = dict(id='one', baseCommit={'oid': sha(1000)}, headCommit={'oid': sha(2001)}, pullRequest=pull())
+        payload = {'merge_group': {'base_ref': 'refs/heads/main', 'base_sha': sha(1000), 'head_sha': sha(2001)}}
+        with patch.object(github, 'queue', side_effect=[QueueInventory(sha(1000), [entry]),
+                QueueInventory(sha(1000), [entry]), QueueInventory(sha(1001), [entry])]):
+            self.assertEqual(self.execute(github, 'merge_group', payload), 1)
+        self.assertNotEqual(github.statuses[-1]['state'], 'success')
+
     def test_fork_and_dependabot_ci_associations_are_authoritative(self):
         for fork in (False, True):
             github = Consumer()
@@ -198,7 +219,7 @@ class ExecutionContracts(unittest.TestCase):
         github = Consumer()
         entry = dict(id='one', baseCommit={'oid': sha(1000)}, headCommit={'oid': sha(2001)}, pullRequest=pull())
         payload = {'merge_group': {'base_ref': 'refs/heads/main', 'base_sha': sha(1000), 'head_sha': sha(2001)}}
-        with patch.object(github, 'queue', side_effect=[[entry], [entry], []]):
+        with patch.object(github, 'queue', side_effect=[QueueInventory(sha(1000), [entry]), QueueInventory(sha(1000), [entry]), QueueInventory(sha(1000), [])]):
             self.assertEqual(self.execute(github, 'merge_group', payload), 1)
         self.assertEqual(github.checks[-1]['conclusion'], 'failure')
 
