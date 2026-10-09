@@ -41,7 +41,9 @@ as well as execution and evidence fields; a personal access token or another app
 is not an interchangeable publisher. The distinct `DCO audit` check exposes evidence and is not the required gate. App binding does **not** uniquely authenticate this checker: another workflow with `statuses: write` can
 publish that status context under the same app. Workflow protection, code ownership, reviewed
 full-SHA pins, and trusted writers are the enforceable boundary of this design.
-The evidence identity and run link support auditing, not independent authorization
+The evidence identity includes the trusted caller revision alongside the action
+revision, policy, and target PR/group contexts. That identity and the run link
+support auditing, not independent authorization
 against a malicious trusted writer. A deployment requiring isolation from repository
 writers needs a separately controlled publisher and credential architecture.
 

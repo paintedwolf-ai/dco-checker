@@ -40,7 +40,7 @@ Checks UI rerun requests are not an action input; dispatch the workflow instead.
 ## Certification
 
 Each result records repository, original PR identities, base/head SHAs, checker
-revision, and policy version. Commit inventories use complete immutable paginated
+revision, trusted caller revision, and policy version. Commit inventories use complete immutable paginated
 comparisons, including contributions after position 250. Merge groups map their
 structured queue ancestry to original member PRs; synthetic queue sign-offs do
 not substitute for original certification. Complete paginated repository open-PR inventories supply all contexts sharing a

@@ -22,8 +22,8 @@ claims about that final action. Attach reports and workflow/run links to the rel
 Select a reviewed supported SHA, update the caller pin, and observe certification
 on ready PRs plus merge groups if a queue is used. If the first caller is not yet
 on the default branch, explicitly dispatch its reviewed installation PR branch
-once GitHub has registered that workflow. Use `gh workflow run dco.yml --ref
-REVIEWED_BRANCH -f pull_request=PR_NUMBER --repo OWNER/REPO`. Inspect the exact
+once GitHub has registered that workflow. Use
+`gh workflow run dco.yml --ref REVIEWED_BRANCH -f pull_request=PR_NUMBER --repo OWNER/REPO`. Inspect the exact
 caller revision, downloaded action SHA, original-commit audit, and required status
 before changing enforcement. This deliberate bootstrap uses the real certification
 implementation and repository Actions token; it does not publish an admission
@@ -69,3 +69,22 @@ claiming to certify different evidence. A lost response is reconciled by exact
 run, attempt, evidence digest, and intended state instead of blindly appending
 another status. Permanent API denial may prevent a write; inspect the failed run
 and existing gate rather than treating the run as proof of a new certification.
+
+## Checker repository enforcement
+
+The default branch requires the aggregate `check` and the `DCO-owned` status, both
+bound to GitHub Actions (integration 15368). Delivery uses PRs and squash merges;
+force pushes, deletion, and bypass actors are prohibited. Release tags matching
+`v*` cannot be updated or deleted. Repository workflow tokens default to read
+permissions, with publication rights explicitly granted only to the DCO caller.
+Secret scanning, push protection, vulnerability alerts, automated security fixes,
+and private vulnerability reporting are enabled.
+
+Self-certification checks out the protected default branch without persisted Git
+credentials and executes that trusted action. Its evidence records the actual
+checkout SHA and caller workflow SHA. Initial installation requires one reviewed,
+signed bootstrap merge before this workflow can run from the default branch;
+observe a real status on the next signed PR before enabling the required context.
+Subsequent deliveries must pass both gates, and squash messages retain a matching
+final sign-off. Release qualification of a consumer still pins the exact resulting
+merged SHA rather than substituting self-check evidence for consumer execution.
