@@ -1,0 +1,2 @@
+# Development workflow validation only; the action runtime is standard-library Python.
+PyYAML==6.0.3

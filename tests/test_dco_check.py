@@ -1,220 +1,349 @@
+"""Independent execution-level certification contracts; no contribution code runs."""
 import copy
+import io
 import json
 from pathlib import Path
-import subprocess
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
-import dco_check as dco
+from dco_checker import Refused
+from dco_checker.engine import Config, run
+from dco_checker.evidence import GitHub
+from dco_checker.transport import APIError
 
 
-def commit(oid="head", message="Signed-off-by: Author <author@example.org>", parents=1):
-    return {"oid": oid, "githubAuthor": {"type": "User"}, "message": message, "author": {"name": "Author", "email": "author@example.org"},
-            "committer": {"name": "Committer", "email": "committer@example.org"}, "parents": {"totalCount": parents}}
+def sha(number):
+    return f'{number:040x}'
 
 
-def pull(number=1, head="head", draft=False):
-    return {"number": number, "headRefOid": head, "baseRefOid": "base", "isDraft": draft, "state": "OPEN"}
+def pull(number=1, head=None, base=None, draft=False):
+    return dict(number=number, headRefOid=head or sha(number), baseRefOid=base or sha(1000), isDraft=draft, state='OPEN')
 
 
-def comparison(commits, total, base="base"):
-    return {"base_commit": {"sha": base}, "total_commits": total,
-            "commits": [{"sha": c["oid"], "commit": {"message": c["message"], "author": c["author"], "committer": c["committer"]},
-                         "author": c["githubAuthor"], "parents": [{}] * c["parents"]["totalCount"]} for c in commits]}
+def commit(oid, signed=True):
+    identity = dict(name='Author', email='author@example.org')
+    return dict(oid=oid, message='Change\n\nSigned-off-by: Author <author@example.org>' if signed else 'Change',
+                author=identity, committer=identity, parents=dict(totalCount=1), githubAuthor=dict(type='User'))
 
 
-def entry(number, base, head):
-    return {"id": str(number), "baseCommit": {"oid": base}, "headCommit": {"oid": head},
-            "pullRequest": pull(number, "original" + str(number))}
-
-
-class FakeGitHub:
-    repository = "org/repo"
-
-    def __init__(self, commits=None):
-        self.original = pull()
-        self.original_commits = commits or [commit()]
+class Consumer:
+    repository = 'org/repo'
+    def __init__(self, members=None):
+        self.members = members or [pull()]
+        self.inventory = {p['number']: [commit(p['headRefOid'])] for p in self.members}
+        self.checks = []
+        self.statuses = []
         self.writes = []
-        self.bot = False
-
+        self.entries = []
+        self.ambiguous = False
+        self.ci = None
     def pull(self, number):
-        return copy.deepcopy(self.original)
-
-    def commits(self, number):
-        return {key: self.original[key] for key in ("headRefOid", "baseRefOid", "isDraft", "state")}, self.original_commits
-
+        return copy.deepcopy(next(p for p in self.members if p['number'] == number))
+    def contexts(self, head):
+        return copy.deepcopy([p for p in self.members if p['headRefOid'] == head])
+    def commits(self, expected):
+        return copy.deepcopy(self.inventory[expected['number']])
+    def queue(self, branch):
+        return copy.deepcopy(self.entries)
     def api(self, path, payload=None, method=None):
+        if '/actions/runs/' in path:
+            return copy.deepcopy(self.ci)
+        if '/actions/workflows/' in path:
+            return {'id': 7}
         if payload is None:
-            return {"sha": self.original_commits[0]["oid"], "author": {"type": "Bot" if self.bot else "User"}}
-        self.writes.append((path, payload, method))
-        return {"id": 10}
+            if '/statuses?' in path:
+                page = int(path.rsplit('page=', 1)[-1])
+                return copy.deepcopy(list(reversed(self.statuses))[(page - 1) * 100:page * 100])
+            if '/check-runs/' in path:
+                return copy.deepcopy(self.checks[int(path.rsplit('/', 1)[-1]) - 1])
+            return {'total_count': len(self.checks), 'check_runs': copy.deepcopy(self.checks)}
+        self.writes.append((method, copy.deepcopy(payload)))
+        if '/statuses/' in path:
+            status = dict(payload, id=len(self.statuses) + 1,
+                          creator=dict(id=41898282, login='github-actions[bot]', type='Bot'))
+            self.statuses.append(status)
+            return copy.deepcopy(status)
+        if method == 'POST':
+            check = dict(payload, id=len(self.checks) + 1, app={"id": 15368})
+            self.checks.append(check)
+            if self.ambiguous:
+                self.ambiguous = False
+                raise APIError('response lost after server committed POST', ambiguous=True)
+        else:
+            check = self.checks[int(path.rsplit('/', 1)[-1]) - 1]
+            check.update(payload)
+        return copy.deepcopy(check)
 
 
-class DCOExecutionTests(unittest.TestCase):
-    def test_identity_matching_merges_bots_and_missing_signoffs(self):
-        self.assertTrue(dco.signoff_valid(commit()))
-        self.assertTrue(dco.signoff_valid(commit(message="SIGNED-OFF-BY: committer <COMMITTER@example.org>")))
-        self.assertFalse(dco.signoff_valid(commit(message="Signed-off-by: Other <other@example.org>")))
-        self.assertFalse(dco.signoff_valid(commit(message="Signed-off-by: Author <author@example>")))
-        self.assertFalse(dco.signoff_valid(commit(message="Signed-off-by: Author <committer@example.org>")))
-        self.assertFalse(dco.signoff_valid(commit(message="missing")))
-        self.assertTrue(dco.signoff_valid(commit(message="missing", parents=2)))
-        github = FakeGitHub([commit(message="missing")])
-        self.assertEqual(dco.certify_pull(github, pull()), ["head"])
-        github.original_commits[0]["githubAuthor"] = {"type": "Bot"}
-        self.assertEqual(dco.certify_pull(github, pull()), [])
 
-    def test_full_inventory_over_250_commits(self):
-        github = dco.GitHub("org/repo")
-        commits = [commit(str(i)) for i in range(276)] + [commit()]
-        pages = [comparison(commits[:100], 277), comparison(commits[100:200], 277), comparison(commits[200:], 277)]
-        with patch.object(github, "pull", return_value=pull()), patch.object(github, "api", side_effect=pages) as api:
-            identity, result = github.commits(1)
-        self.assertEqual(len(result), 277)
-        self.assertEqual(identity["headRefOid"], "head")
-        self.assertEqual([call.args[0].split("page=")[-1] for call in api.call_args_list], ["1", "2", "3"])
+class ExecutionContracts(unittest.TestCase):
+    def execute(self, github, event='workflow_dispatch', payload=None, run_id=10):
+        config = Config(sha(900), run_id, 1, f'https://github.com/org/repo/actions/runs/{run_id}', sha(901))
+        with redirect_stdout(io.StringIO()):
+            return run(github, event, payload or {'inputs': {'pull_request': '1'}}, config)
 
-    def test_partial_duplicate_and_changed_pages_fail_closed(self):
-        first = [commit(str(i)) for i in range(100)]
-        cases = [
-            [comparison([commit()], 2)],
-            [comparison(first, 101), comparison([first[0]], 101)],
-            [comparison(first, 101), comparison([commit()], 102)],
-            [comparison([commit()], 1, base="wrong")],
-            [comparison([commit("wronghead")], 1)],
-        ]
-        for pages in cases:
-            with self.subTest(pages=pages):
-                github = dco.GitHub("org/repo")
-                with patch.object(github, "pull", return_value=pull()), patch.object(github, "api", side_effect=pages), self.assertRaises(dco.Refused):
-                    github.commits(1)
-        for changed in [pull(head="new"), pull(draft=True), {**pull(), "baseRefOid": "newbase"}]:
-            github = dco.GitHub("org/repo")
-            with patch.object(github, "pull", side_effect=[pull(), changed]), patch.object(github, "api", return_value=comparison([commit()], 1)), self.assertRaises(dco.Refused):
-                github.commits(1)
+    def test_duplicate_delivery_converges_on_identified_check(self):
+        github = Consumer()
+        self.assertEqual(self.execute(github), 0)
+        self.assertEqual(self.execute(github), 0)
+        self.assertEqual(len(github.checks), 1)
+        self.assertEqual(github.checks[0]['conclusion'], 'success')
+        self.assertEqual(sum(method == 'POST' and payload.get('name') == 'DCO audit' for method, payload in github.writes), 1)
+        self.assertEqual(len(github.statuses), 2)
 
-    def test_api_errors_reject_partial_graphql_and_transport_failure(self):
-        github = dco.GitHub("org/repo")
-        with patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps({"data": {}, "errors": [{"message": "partial"}]}))), self.assertRaises(dco.Refused):
-            github.query("name")
-        with patch.object(subprocess, "run", side_effect=subprocess.CalledProcessError(1, "gh")), self.assertRaises(subprocess.CalledProcessError):
-            github.pull(1)
+    def test_ambiguous_post_reconciles_without_duplicate(self):
+        github = Consumer(); github.ambiguous = True
+        self.assertEqual(self.execute(github), 0)
+        self.assertEqual(len(github.checks), 1)
+        self.assertEqual(github.checks[0]['status'], 'completed')
 
-    def test_queue_uses_structured_ancestry_instead_of_synthetic_signoff(self):
-        entries = [entry(1, "base", "queue1"), entry(2, "queue1", "queue2")]
-        self.assertEqual([p["number"] for p in dco.queue_members(entries, "base", "queue2")], [1, 2])
-        for invalid in [entries[:1], [entry(1, "missing", "queue2")], [entry(1, "queue2", "queue2")], entries + [entry(3, "base", "queue2")]]:
-            with self.assertRaises(dco.Refused):
-                dco.queue_members(invalid, "base", "queue2")
+    def test_same_head_new_base_gets_new_evidence_and_pending(self):
+        github = Consumer()
+        self.execute(github)
+        digest = github.checks[0]['external_id'].rsplit(':', 1)[-1]
+        github.members[0]['baseRefOid'] = sha(1001)
+        self.assertEqual(self.execute(github, run_id=11), 0)
+        self.assertNotEqual(digest, github.checks[-1]['external_id'].rsplit(':', 1)[-1])
+        self.assertEqual(github.statuses[-2]['state'], 'pending')
+        self.assertEqual(github.checks[-1]['name'], 'DCO audit')
 
-    def test_queue_inventory_paginates_and_rejects_truncation(self):
-        github = dco.GitHub("org/repo")
-        def connection(nodes, cursor, more, total=2):
-            return {"mergeQueue": {"entries": {"nodes": nodes, "totalCount": total, "pageInfo": {"hasNextPage": more, "endCursor": cursor}}}}
-        a, b = entry(1, "base", "q1"), entry(2, "q1", "q2")
-        with patch.object(github, "query", side_effect=[connection([a], "a", True), connection([b], None, False)]):
-            self.assertEqual(github.queue("main"), [a, b])
-        with patch.object(github, "query", return_value=connection([a], None, False)), self.assertRaises(dco.Refused):
-            github.queue("main")
-        with patch.object(github, "query", side_effect=[connection([a], "a", True), connection([a], "b", True)]), self.assertRaises(dco.Refused):
-            github.queue("main")
+    def test_failed_inventory_invalidates_current_attempt(self):
+        github = Consumer(); self.execute(github)
+        with patch.object(github, 'commits', side_effect=Refused('incomplete comparison')):
+            self.assertEqual(self.execute(github, run_id=11), 1)
+        self.assertEqual(github.checks[-1]['conclusion'], 'failure')
+        self.assertIn('Evidence unavailable', github.checks[-1]['output']['summary'])
 
-    def test_pr_check_publishes_on_original_head_and_failure_does_not_pass(self):
-        event = {"pull_request": {"number": 1, "head": {"sha": "head"}, "base": {"sha": "base"}, "draft": False}}
-        github = FakeGitHub()
-        self.assertEqual(dco.run(github, "pull_request_target", event), 0)
-        self.assertEqual(github.writes[0][1]["head_sha"], "head")
-        self.assertEqual(github.writes[-1][1]["conclusion"], "success")
-        github = FakeGitHub([commit(message="missing")])
-        self.assertEqual(dco.run(github, "pull_request_target", event), 1)
-        self.assertEqual(github.writes[-1][1]["conclusion"], "failure")
+    def test_newer_execution_prevents_older_overwrite(self):
+        github = Consumer(); self.execute(github, run_id=20)
+        before = copy.deepcopy(github.writes)
+        self.assertEqual(self.execute(github, run_id=10), 1)
+        self.assertEqual(github.writes, before)
 
-    def test_live_draft_before_creation_remains_untouched(self):
-        github = FakeGitHub()
-        github.original["isDraft"] = True
-        self.assertEqual(dco.run(github, "pull_request_target", {"pull_request": {"number": 1, "head": {"sha": "head"}, "base": {"sha": "base"}}}), 0)
+    def test_interrupted_scan_remains_pending_and_new_attempt_recovers(self):
+        github = Consumer()
+        with patch.object(github, 'commits', side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+            self.execute(github)
+        self.assertEqual(github.checks[0]['status'], 'in_progress')
+        self.assertEqual(self.execute(github, run_id=11), 0)
+        self.assertEqual(github.checks[-1]['conclusion'], 'success')
+
+    def test_shared_head_all_contexts_certified_and_draft_blocks_writes(self):
+        github = Consumer([pull(), pull(2, head=sha(1), base=sha(1001))])
+        github.inventory[2] = [commit(sha(1), signed=False)]
+        self.assertEqual(self.execute(github), 1)
+        self.assertIn('PR #2', github.checks[-1]['output']['summary'])
+        github.members[1]['isDraft'] = True
+        before = copy.deepcopy(github.writes)
+        self.assertEqual(self.execute(github, run_id=11), 0)
+        self.assertEqual(github.writes, before)
+
+    def test_multi_member_queue_evaluates_originals_and_group_head(self):
+        github = Consumer([pull(), pull(2)])
+        github.entries = [dict(id='one', baseCommit={'oid': sha(1000)}, headCommit={'oid': sha(2001)}, pullRequest=pull()),
+                          dict(id='two', baseCommit={'oid': sha(2001)}, headCommit={'oid': sha(2002)}, pullRequest=pull(2))]
+        payload = {'merge_group': {'base_ref': 'refs/heads/main', 'base_sha': sha(1000), 'head_sha': sha(2002)}}
+        self.assertEqual(self.execute(github, 'merge_group', payload), 0)
+        self.assertEqual(github.checks[-1]['head_sha'], sha(2002))
+        github.inventory[2] = [commit(sha(2), signed=False)]
+        self.assertEqual(self.execute(github, 'merge_group', payload, run_id=11), 1)
+        self.assertIn('PR #2', github.checks[-1]['output']['summary'])
+
+    def test_fork_and_dependabot_ci_associations_are_authoritative(self):
+        for fork in (False, True):
+            github = Consumer()
+            github.ci = {'id': 99, 'repository': {'full_name': 'org/repo'}, 'workflow_id': 7, 'event': 'pull_request',
+                         'status': 'completed', 'head_sha': sha(1), 'actor': {'login': 'dependabot[bot]'},
+                         'head_repository': {'full_name': 'other/repo' if fork else 'org/repo'},
+                         'pull_requests': [{'number': 1, 'head': {'sha': sha(1)}, 'base': {'sha': sha(1000)}}]}
+            self.assertEqual(self.execute(github, 'workflow_run', {'workflow_run': copy.deepcopy(github.ci)}), 0)
+            github.members[0]['headRefOid'] = sha(2)
+            before = copy.deepcopy(github.writes)
+            self.assertEqual(self.execute(github, 'workflow_run', {'workflow_run': copy.deepcopy(github.ci)}, run_id=11), 0)
+            self.assertEqual(github.writes, before)
+
+    def test_unsigned_after_250_fails_entire_certification(self):
+        github = Consumer([pull(head=sha(251))])
+        nodes = []
+        for number in range(1, 252):
+            c = commit(sha(number), signed=number != 251)
+            nodes.append({'sha': c['oid'], 'commit': {key: c[key] for key in ('message','author','committer')},
+                          'author': c['githubAuthor'], 'parents': [{'sha': sha(number-1)}]})
+        transport = type('Recorded', (), {})()
+        transport.request = lambda path, payload=None, method=None: {'base_commit': {'sha': sha(1000)}, 'total_commits': 251,
+            'commits': nodes[(int(path.rsplit('page=', 1)[-1])-1)*100:int(path.rsplit('page=',1)[-1])*100]}
+        inventory = GitHub('org/repo', transport)
+        github.commits = inventory.commits
+        self.assertEqual(self.execute(github), 1)
+        self.assertIn(sha(251)[:12], github.checks[-1]['output']['summary'])
+        self.assertIn('250 signed, 0 exempt, 1 failed', github.checks[-1]['output']['summary'])
+
+    def test_partial_duplicate_and_missing_head_inventories_cannot_pass(self):
+        first = commit(sha(1))
+        raw = {'sha': first['oid'], 'commit': {key: first[key] for key in ('message','author','committer')},
+               'author': first['githubAuthor'], 'parents': [{'sha': sha(0)}]}
+        cases = [dict(base_commit={'sha': sha(1000)}, total_commits=2, commits=[raw]),
+                 dict(base_commit={'sha': sha(1000)}, total_commits=2, commits=[raw, raw]),
+                 dict(base_commit={'sha': sha(999)}, total_commits=1, commits=[raw]),
+                 dict(base_commit={'sha': sha(1000)}, total_commits=1, commits=[dict(raw, sha=sha(2))])]
+        for response in cases:
+            with self.subTest(response=response):
+                transport = type('Recorded', (), {})()
+                transport.request = lambda *a, **kw: response
+                with self.assertRaises(Refused):
+                    GitHub('org/repo', transport).commits(pull())
+
+    def test_queue_membership_disappearing_never_finishes_success(self):
+        github = Consumer()
+        entry = dict(id='one', baseCommit={'oid': sha(1000)}, headCommit={'oid': sha(2001)}, pullRequest=pull())
+        payload = {'merge_group': {'base_ref': 'refs/heads/main', 'base_sha': sha(1000), 'head_sha': sha(2001)}}
+        with patch.object(github, 'queue', side_effect=[[entry], [entry], []]):
+            self.assertEqual(self.execute(github, 'merge_group', payload), 1)
+        self.assertEqual(github.checks[-1]['conclusion'], 'failure')
+
+    def test_return_to_draft_leaves_pending_untouched(self):
+        github = Consumer()
+        def inventory(expected):
+            github.members[0]['isDraft'] = True
+            return [commit(sha(1))]
+        github.commits = inventory
+        self.assertEqual(self.execute(github), 1)
+        self.assertEqual(github.checks[-1]['status'], 'in_progress')
+        self.assertEqual(len(github.writes), 2)
+        self.assertEqual(github.statuses[-1]['state'], 'pending')
+
+    def test_gate_pending_precedes_audit_and_terminal_gate_follows_audit(self):
+        github = Consumer()
+        self.assertEqual(self.execute(github), 0)
+        self.assertEqual([payload.get('state') or payload.get('status') for _, payload in github.writes],
+                         ['pending', 'in_progress', 'completed', 'success'])
+        self.assertEqual(github.writes[0][1]['context'], 'DCO-owned')
+        self.assertEqual(github.writes[1][1]['name'], 'DCO audit')
+
+    def test_audit_api_failure_after_target_resolution_invalidates_old_success(self):
+        github = Consumer(); self.execute(github)
+        original_api = github.api
+        def unavailable(path, payload=None, method=None):
+            if '/check-runs' in path:
+                raise APIError('audit API unavailable')
+            return original_api(path, payload, method)
+        github.api = unavailable
+        self.assertEqual(self.execute(github, run_id=11), 1)
+        self.assertEqual(github.statuses[-1]['state'], 'pending')
+        self.assertIn('/runs/11#', github.statuses[-1]['target_url'])
+
+    def test_infrastructure_error_blocks_gate_and_has_distinct_state(self):
+        github = Consumer()
+        with patch.object(github, 'commits', side_effect=Refused('incomplete comparison')):
+            self.assertEqual(self.execute(github), 1)
+        self.assertEqual(github.statuses[-1]['state'], 'error')
+        self.assertEqual(github.checks[-1]['conclusion'], 'failure')
+
+    def test_lost_terminal_status_response_recovers_complete_publication(self):
+        github = Consumer()
+        original_api = github.api
+        lost = [False]
+        def response_lost(path, payload=None, method=None):
+            result = original_api(path, payload, method)
+            if payload is not None and payload.get('state') == 'success':
+                lost[0] = True
+                raise APIError('terminal response lost', ambiguous=True)
+            if '/statuses?' in path and lost[0]:
+                lost[0] = False
+                raise APIError('first reconciliation unavailable')
+            return result
+        github.api = response_lost
+        self.assertEqual(self.execute(github), 0)
+        self.assertEqual([s['state'] for s in github.statuses], ['pending', 'success'])
+        self.assertEqual(github.checks[-1]['conclusion'], 'success')
+
+    def test_malformed_unapplied_audit_completion_cannot_green_gate(self):
+        github = Consumer(); original_api = github.api
+        def malformed(path, payload=None, method=None):
+            if method == 'PATCH':
+                return {'unexpected': 'body'}
+            return original_api(path, payload, method)
+        github.api = malformed
+        self.assertEqual(self.execute(github), 1)
+        self.assertEqual(github.statuses[-1]['state'], 'pending')
+        self.assertNotIn('success', [status['state'] for status in github.statuses])
+
+    def test_malformed_applied_audit_response_requires_verified_get_before_green(self):
+        github = Consumer(); original_api = github.api
+        verified_get = []
+        def malformed(path, payload=None, method=None):
+            result = original_api(path, payload, method)
+            if method == 'PATCH':
+                return {}
+            if '/check-runs/' in path and payload is None:
+                verified_get.append(result)
+                return copy.deepcopy(github.checks[int(path.rsplit('/', 1)[-1])-1])
+            return result
+        github.api = malformed
+        self.assertEqual(self.execute(github), 0)
+        self.assertEqual(len(verified_get), 1)
+        self.assertEqual(github.statuses[-1]['state'], 'success')
+
+    def recorded_ci(self, name, members=None):
+        fixture = Path(__file__).parent / 'fixtures' / name
+        recorded = json.loads(fixture.read_text())['workflow_run']
+        github = Consumer(members)
+        github.repository = recorded['repository']['full_name']
+        github.ci = copy.deepcopy(recorded)
+        original_api = github.api
+        def fixture_api(path, payload=None, method=None):
+            if '/actions/workflows/' in path:
+                return {'id': recorded['workflow_id']}
+            return original_api(path, payload, method)
+        github.api = fixture_api
+        return github, recorded
+
+    def execute_recorded(self, github, recorded):
+        config = Config(sha(900), 10, 1, f'https://github.com/{github.repository}/actions/runs/10', sha(901))
+        with redirect_stdout(io.StringIO()):
+            return run(github, 'workflow_run', {'workflow_run': recorded}, config)
+
+    def test_recorded_contradictory_ci_association_cannot_publish(self):
+        github, recorded = self.recorded_ci('historical-ci-association-refreshed.json')
+        self.assertEqual(self.execute_recorded(github, recorded), 1)
         self.assertEqual(github.writes, [])
 
-    def test_race_during_certification_cannot_publish_success(self):
-        github = FakeGitHub()
-        with patch.object(github, "pull", side_effect=[pull(), pull(), pull(head="new"), pull(head="new"), pull(head="new")]):
-            self.assertEqual(dco.run(github, "workflow_dispatch", {"inputs": {"pull_request": "1"}}), 1)
+    def test_recorded_empty_ci_association_certifies_complete_live_head_contexts(self):
+        recorded = json.loads((Path(__file__).parent / 'fixtures/ci-association-absent.json').read_text())['workflow_run']
+        github, recorded = self.recorded_ci('ci-association-absent.json',
+            [pull(1, head=recorded['head_sha']), pull(2, head=recorded['head_sha'], base=sha(1001))])
+        self.assertEqual(self.execute_recorded(github, recorded), 0)
+        self.assertEqual(github.checks[-1]['head_sha'], recorded['head_sha'])
+        self.assertIn('PR #2', github.checks[-1]['output']['summary'])
+        github, recorded = self.recorded_ci('ci-association-absent.json',
+            [pull(1, head=recorded['head_sha']), pull(2, head=recorded['head_sha'], base=sha(1001))])
+        github.inventory[2] = [commit(recorded['head_sha'], signed=False)]
+        self.assertEqual(self.execute_recorded(github, recorded), 1)
+        self.assertEqual(github.checks[-1]['conclusion'], 'failure')
+
+    def test_recorded_empty_ci_association_skips_obsolete_head_and_draft(self):
+        github, recorded = self.recorded_ci('ci-association-absent.json')
+        self.assertEqual(self.execute_recorded(github, recorded), 0)
+        self.assertEqual(github.writes, [])
+        github, recorded = self.recorded_ci('ci-association-absent.json', [pull(1, head=recorded['head_sha'], draft=True)])
+        self.assertEqual(self.execute_recorded(github, recorded), 0)
         self.assertEqual(github.writes, [])
 
-
-    def test_return_to_draft_publishes_no_check(self):
-        github = FakeGitHub()
-        with patch.object(github, "pull", side_effect=[pull(), pull(), pull(draft=True), pull(draft=True)]):
-            self.assertEqual(dco.run(github, "workflow_dispatch", {"inputs": {"pull_request": "1"}}), 1)
+    def test_recorded_empty_ci_association_requires_complete_inventory_and_trusted_run(self):
+        recorded = json.loads((Path(__file__).parent / 'fixtures/ci-association-absent.json').read_text())['workflow_run']
+        github, recorded = self.recorded_ci('ci-association-absent.json', [pull(1, head=recorded['head_sha'])])
+        with patch.object(github, 'contexts', side_effect=Refused('Incomplete open PR inventory')):
+            self.assertEqual(self.execute_recorded(github, recorded), 1)
         self.assertEqual(github.writes, [])
-
-    def test_merge_group_checks_original_commits_and_detects_membership_race(self):
-        github = FakeGitHub([commit(message="missing")])
-        event = {"merge_group": {"base_ref": "refs/heads/main", "base_sha": "base", "head_sha": "queue"}}
-        member = entry(1, "base", "queue")
-        member["pullRequest"] = pull()
-        with patch.object(github, "queue", create=True, return_value=[member]):
-            self.assertEqual(dco.run(github, "merge_group", event), 1)
-        self.assertEqual(github.writes[0][1]["head_sha"], "queue")
-        self.assertEqual(github.writes[-1][1]["conclusion"], "failure")
-        github = FakeGitHub()
-        with patch.object(github, "queue", create=True, side_effect=[[member], []]):
-            self.assertEqual(dco.run(github, "merge_group", event), 1)
-        self.assertEqual(github.writes[-1][1]["conclusion"], "failure")
+        for field, value in [('repository', {'full_name': 'foreign/repo'}), ('event', 'push'),
+                             ('head_sha', sha(888)), ('pull_requests', None), ('id', 123)]:
+            with self.subTest(field=field):
+                github, recorded = self.recorded_ci('ci-association-absent.json', [pull(1, head=recorded['head_sha'])])
+                github.ci[field] = value
+                self.assertEqual(self.execute_recorded(github, recorded), 1)
+                self.assertEqual(github.writes, [])
 
 
-    def test_stale_event_base_cannot_certify_same_head(self):
-        github = FakeGitHub()
-        event = {"pull_request": {"number": 1, "head": {"sha": "head"}, "base": {"sha": "oldbase"}}}
-        with self.assertRaises(dco.Refused):
-            dco.run(github, "pull_request_target", event)
-        self.assertEqual(github.writes, [])
-
-
-    def test_workflow_run_requires_exact_ci_pr_association(self):
-        github = FakeGitHub()
-        association = {"number": 1, "head": {"sha": "head"}, "base": {"sha": "base"}}
-        run = {"id": 99, "repository": {"full_name": "org/repo"}, "workflow_id": 7,
-               "event": "pull_request", "status": "completed", "head_sha": "head", "pull_requests": [association]}
-        event = {"workflow_run": run}
-        with patch.object(github, "api", side_effect=[run, {"id": 7}]):
-            self.assertEqual(dco.target("workflow_run", event, github), ("head", [pull()], None))
-        for changed in [{**run, "pull_requests": []}, {**run, "pull_requests": [association, association]},
-                        {**run, "head_sha": "new"}, {**run, "workflow_id": 8},
-                        {**run, "event": "merge_group"}, {**run, "repository": {"full_name": "foreign/repo"}}]:
-            with patch.object(github, "api", side_effect=[changed, {"id": 7}]), self.assertRaises(dco.Refused):
-                dco.target("workflow_run", event, github)
-        for changed in [pull(head="new"), {**pull(), "baseRefOid": "newbase"}]:
-            with patch.object(github, "api", side_effect=[run, {"id": 7}]), patch.object(github, "pull", return_value=changed), self.assertRaises(dco.Refused):
-                dco.target("workflow_run", event, github)
-        with patch.object(github, "api", side_effect=[run, {"id": 7}]), patch.object(github, "pull", return_value=pull(draft=True)):
-            self.assertIsNone(dco.target("workflow_run", event, github))
-        self.assertEqual(github.writes, [])
-
-    def test_shared_action_runs_its_pinned_source_without_caller_checkout(self):
-        root = Path(__file__).parents[1]
-        workflow = (root / "examples/dco.yml").read_text()
-        action = (root / "action.yml").read_text()
-        self.assertIn("pull_request_target:", workflow)
-        self.assertIn("ready_for_review, edited", workflow)
-        self.assertIn("workflows: [CI]", workflow)
-        self.assertIn("workflow_run.event == 'pull_request'", workflow)
-        self.assertIn("merge_group:", workflow)
-        self.assertIn("paintedwolf-ai/dco-checker@REPLACE_WITH_REVIEWED_COMMIT_SHA", workflow)
-        self.assertNotIn("actions/checkout", workflow)
-        self.assertNotIn("download-artifact", workflow)
-        self.assertIn('python3 "$DCO_ACTION_PATH/scripts/dco_check.py"', action)
-        self.assertNotIn("github.event.pull_request.head", action)
-
-    def test_workflow_run_configures_ci_filename_and_rejects_other_paths(self):
-        github = FakeGitHub()
-        association = {"number": 1, "head": {"sha": "head"}, "base": {"sha": "base"}}
-        run = {"id": 99, "repository": {"full_name": "org/repo"}, "workflow_id": 7,
-               "event": "pull_request", "status": "completed", "head_sha": "head", "pull_requests": [association]}
-        with patch.dict(dco.os.environ, {"DCO_CI_WORKFLOW": "verify.yaml"}), patch.object(github, "api", side_effect=[run, {"id": 7}]) as api:
-            self.assertEqual(dco.target("workflow_run", {"workflow_run": run}, github), ("head", [pull()], None))
-            self.assertEqual(api.call_args_list[1].args[0], "repos/org/repo/actions/workflows/verify.yaml")
-        for invalid in ["../ci.yml", "https://example.org/ci.yml", "ci.yml?ref=other", "ci.yml#other"]:
-            with patch.dict(dco.os.environ, {"DCO_CI_WORKFLOW": invalid}), patch.object(github, "api", return_value=run), self.assertRaises(dco.Refused):
-                dco.target("workflow_run", {"workflow_run": run}, github)
-        self.assertEqual(github.writes, [])
+if __name__ == '__main__':
+    unittest.main()
