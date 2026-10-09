@@ -73,6 +73,9 @@ def render(repository, evidence, results, *, error=None):
     for reason, count in exempt.items():
         text.append(f"- Exempt: {count} — {reason}.")
     text += ["", "Recheck using the DCO workflow's manual dispatch with the PR number. Check UI rerun requests are not supported.", "", "### Evidence", "", f"Target: `{evidence['sha']}`. Policy: `{POLICY_VERSION}`; checker: `{html.escape(evidence['revision'])}`; caller: `{evidence['caller_revision']}`; digest: `{evidence['digest']}`."]
+    if evidence["group"]:
+        group = evidence["group"]
+        text += ["", f"Queue branch: {escape_markdown(group['branch'])}. Protected root: `{group['root']}`; event base checkpoint: `{group['event_base']}`."]
     for member in evidence["members"]:
         text.append(f"- PR #{member['number']}: base `{member['baseRefOid']}`, head `{member['headRefOid']}`.")
     output = "\n".join(text)

@@ -66,6 +66,16 @@ Record the actual trigger and immutable SHAs for each scenario:
 | Interrupted/API-unavailable scan | Pending or failed result; recovered newer run certifies current evidence |
 | Publisher boundary | Ruleset app binding plus reviewed publisher workflow controls |
 
+For cumulative-group qualification, instrument the reviewed disposable caller to
+log the actual `GITHUB_EVENT_PATH` JSON as `DCO_QUALIFICATION_EVENT=` and a
+complete GraphQL protected-branch/queue snapshot as `DCO_QUALIFICATION_QUEUE=`
+before invoking the action. Log response data, never credentials. The recorder
+requires those captures for groups, reconstructs the complete prefix, compares
+original-member snapshots and root/event checkpoint, and independently
+recomputes the canonical evidence digest published by the action. A missing or
+partial capture is not eligible release evidence. These fixture diagnostics are
+not part of the production caller.
+
 Local execution tests exercise duplicate delivery, delayed fork/Dependabot-shaped
 payloads (including genuine recorded empty fork associations), interruption, API
 failure, same-head retargeting, shared-head contexts,
