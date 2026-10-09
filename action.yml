@@ -1,0 +1,22 @@
+name: Original commit certification
+description: Certify original pull request commits and merge queue members under the DCO.
+inputs:
+  token:
+    description: Caller repository token with pull request and Actions read, and checks write permissions.
+    required: false
+    default: ${{ github.token }}
+  ci-workflow:
+    description: Caller CI workflow filename used to verify workflow_run events.
+    required: false
+    default: ci.yml
+runs:
+  using: composite
+  steps:
+    - name: Certify original PR commits
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        DCO_CI_WORKFLOW: ${{ inputs.ci-workflow }}
+        DCO_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        DCO_ACTION_PATH: ${{ github.action_path }}
+      run: python3 "$DCO_ACTION_PATH/scripts/dco_check.py"
