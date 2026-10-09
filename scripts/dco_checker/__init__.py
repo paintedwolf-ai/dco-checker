@@ -1,6 +1,7 @@
 """Original-commit certification for trusted GitHub Actions callers."""
 POLICY_VERSION = "2"
-CHECK_NAME = "DCO-owned"
+GATE_CONTEXT = "DCO-owned"
+AUDIT_NAME = "DCO audit"
 
 
 class Refused(RuntimeError):

@@ -18,7 +18,8 @@ def main():
         if os.environ.get("GITHUB_SERVER_URL", "https://github.com") != "https://github.com" or os.environ.get("GITHUB_API_URL", "https://api.github.com") != "https://api.github.com":
             raise Refused("Only GitHub.com is currently supported")
         config = Config(os.environ["DCO_CHECKER_REVISION"], int(os.environ["DCO_RUN_ID"]),
-                        int(os.environ["DCO_RUN_ATTEMPT"]), os.environ["DCO_RUN_URL"], os.environ.get("DCO_CI_WORKFLOW", "ci.yml"))
+                        int(os.environ["DCO_RUN_ATTEMPT"]), os.environ["DCO_RUN_URL"], os.environ["DCO_CALLER_REVISION"],
+                        os.environ.get("DCO_CI_WORKFLOW", "ci.yml"))
         github = GitHub(os.environ["GITHUB_REPOSITORY"], Transport(os.environ["GH_TOKEN"]))
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
         return run(github, os.environ["GITHUB_EVENT_NAME"], event, config)

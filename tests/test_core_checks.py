@@ -1,7 +1,7 @@
 import copy
 import unittest
 from dco_checker import Obsolete, Refused
-from dco_checker.checks import Publisher
+from dco_checker.checks import Audit
 from dco_checker.engine import Config, make_evidence
 from dco_checker.transport import APIError
 
@@ -33,8 +33,8 @@ class API:
 
 
 def publisher(api, run_id=10, attempt=1):
-    evidence = make_evidence("org/repo", "a" * 40, [], None, "b" * 40)
-    return Publisher(api, "a" * 40, evidence, Config("b" * 40, run_id, attempt, "https://github.com/org/repo/actions/runs/10"))
+    evidence = make_evidence("org/repo", "a" * 40, [], None, "b" * 40, "c" * 40)
+    return Audit(api, "a" * 40, evidence, Config("b" * 40, run_id, attempt, "https://github.com/org/repo/actions/runs/10", "c" * 40))
 
 
 class ChecksTests(unittest.TestCase):
@@ -112,8 +112,52 @@ class ChecksTests(unittest.TestCase):
         self.assertEqual(record["external_id"], check.external_id)
         self.assertEqual(record["run_id"], 10)
         self.assertEqual(record["checker_revision"], "b" * 40)
+        self.assertEqual(record["caller_revision"], "c" * 40)
         # Mimic GitHub's suite/details URL rewriting; explicit provenance survives.
         api.checks[0]["details_url"] = "https://github.com/org/repo/runs/123"
         check.finish("success", "certified")
         self.assertEqual(api.checks[0]["output"]["text"], pending["text"])
         self.assertIn("actions/runs/10", api.checks[0]["output"]["summary"])
+
+    def test_malformed_success_response_recovers_confirmed_get(self):
+        api = API(); check = publisher(api); check.start()
+        original_api = api.api
+        def malformed(path, payload=None, method=None):
+            response = original_api(path, payload, method)
+            return {"unexpected": "body"} if method == "PATCH" else response
+        api.api = malformed
+        check.finish("success", "certified")
+        self.assertEqual(check.check["status"], "completed")
+        self.assertEqual(check.check["conclusion"], "success")
+
+    def test_unconfirmed_normal_patch_responses_never_claim_completion(self):
+        api = API(); check = publisher(api); check.start()
+        original_api = api.api
+        patches = []
+        def ignored(path, payload=None, method=None):
+            if method == "PATCH":
+                patches.append(payload)
+                return {"unexpected": "body"}
+            return original_api(path, payload, method)
+        api.api = ignored
+        with self.assertRaisesRegex(Refused, "could not be confirmed"):
+            check.finish("success", "certified")
+        self.assertEqual(len(patches), 2)
+        self.assertEqual(api.checks[0]["status"], "in_progress")
+
+    def test_contradictory_completion_get_refuses_before_retry(self):
+        api = API(); check = publisher(api); check.start()
+        original_api = api.api
+        patches = []
+        def contradictory(path, payload=None, method=None):
+            if method == "PATCH":
+                patches.append(payload)
+                return {}
+            response = original_api(path, payload, method)
+            if payload is None and "check-runs?" not in path:
+                response["head_sha"] = "d" * 40
+            return response
+        api.api = contradictory
+        with self.assertRaises(Refused):
+            check.finish("success", "certified")
+        self.assertEqual(len(patches), 1)

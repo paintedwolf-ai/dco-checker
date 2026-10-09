@@ -25,7 +25,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(evaluate(value, 1).outcome, "failed")
 
     def test_output_bounds_failures_and_escapes_errors(self):
-        evidence = make_evidence("org/repo", "a" * 40, [], None, "b" * 40)
+        evidence = make_evidence("org/repo", "a" * 40, [], None, "b" * 40, "c" * 40)
         results = [evaluate(commit("no trailer"), 1) for _ in range(130)]
         output = render("org/repo", evidence, results, error="<script>bad</script>")
         self.assertIn("30 additional", output)
@@ -34,6 +34,12 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("130 failed", output)
 
     def test_evidence_digest_binds_every_context_and_policy(self):
-        first = make_evidence("org/repo", "a" * 40, [{"number": 1}], None, "b" * 40)
-        second = make_evidence("org/repo", "a" * 40, [{"number": 2}], None, "b" * 40)
+        first = make_evidence("org/repo", "a" * 40, [{"number": 1}], None, "b" * 40, "c" * 40)
+        second = make_evidence("org/repo", "a" * 40, [{"number": 2}], None, "b" * 40, "c" * 40)
         self.assertNotEqual(first["digest"], second["digest"])
+
+    def test_evidence_digest_binds_executed_caller_revision(self):
+        first = make_evidence("org/repo", "a" * 40, [], None, "b" * 40, "c" * 40)
+        second = make_evidence("org/repo", "a" * 40, [], None, "b" * 40, "d" * 40)
+        self.assertNotEqual(first["digest"], second["digest"])
+        self.assertEqual(first["caller_revision"], "c" * 40)

@@ -56,3 +56,24 @@ a wakeup, then establishes complete live PR authority and scans original commits
 Its local tests replay recorded empty associations and reject incomplete or
 contradictory authority. This fallback revision requires subsequent hosted evidence
 and does not inherit a successful claim from the manual fork certification.
+
+## Required-status architecture qualification
+
+A later signed fixture PR had a successful `DCO-owned` custom Actions check on its
+exact head but GitHub still reported that the required check was expected. GitHub attached the check to an older Actions suite, and a newer suite did not
+contain that custom check. Suite selection was a possible explanation, not a
+proven causal mechanism. The observed successful-check/expected-gate mismatch
+made the custom-check gate unsuitable as the sole production requirement.
+
+A reviewed fixture-only publisher emitted a distinct `DCO-status-probe` commit
+status on the authentic fork head in
+[run 37986224580](https://github.com/paintedwolf-ai/dco-checker-qualification/actions/runs/37986224580).
+The status creator was GitHub Actions bot ID 41898282. With that status as the only
+required context bound to integration 15368, GitHub accepted the same fork PR into
+the protected merge queue. Other rules—including PR delivery, force-push/deletion
+restrictions, and queue configuration—were preserved. This proves platform status
+app binding and suite independence; the test-only success is not DCO certification.
+
+The resulting shipped architecture uses a required `DCO-owned` commit status and
+a distinct `DCO audit` rich check. Final qualification must verify both against
+the same immutable evidence and actual downloaded release SHA.

@@ -28,11 +28,11 @@ def verify(run, jobs, checks, *, repository, run_id, head, conclusion, app_id, a
                for job in jobs):
         errors.append("no composite certification step appears in recorded jobs")
     run_url = run.get("html_url")
-    candidates = [check for check in checks if check.get("name") == "DCO-owned"
+    candidates = [check for check in checks if check.get("name") == "DCO audit"
                   and check.get("head_sha") == head
                   and str(check.get("external_id", "")).startswith(f"dco:v2:{run_id}:{run.get('run_attempt', 1)}:")]
     if not candidates:
-        errors.append("no DCO-owned check belongs to this exact run and target head")
+        errors.append("no DCO audit check belongs to this exact run and target head")
     for check in candidates:
         if check.get("status") != "completed" or check.get("conclusion") != conclusion:
             errors.append("published check has unexpected terminal outcome")
@@ -48,6 +48,25 @@ def verify(run, jobs, checks, *, repository, run_id, head, conclusion, app_id, a
     return errors
 
 
+def verify_gate(statuses, checks, run, expected_state):
+    identity = f"dco:v2:{run['id']}:{run.get('run_attempt', 1)}:"
+    audits = [check for check in checks if check.get('name') == 'DCO audit'
+              and str(check.get('external_id', '')).startswith(identity)]
+    owned = [status for status in statuses if status.get('context') == 'DCO-owned'
+             and str(status.get('target_url', '')).startswith(run['html_url'] + '#' + identity)]
+    errors = []
+    terminal = [status for status in owned if status.get('state') == expected_state]
+    if not terminal:
+        errors.append('no required DCO-owned terminal status belongs to this exact execution')
+    for status in terminal:
+        creator = status.get('creator') or {}
+        if creator.get('id') != 41898282 or creator.get('login') != 'github-actions[bot]' or creator.get('type') != 'Bot':
+            errors.append('required status was not published by GitHub Actions')
+        if not any(status.get('target_url') == run['html_url'] + '#' + check['external_id'] for check in audits):
+            errors.append('required status and audit do not identify the same immutable evidence')
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", required=True)
@@ -55,6 +74,7 @@ def main():
     parser.add_argument("--head", required=True)
     parser.add_argument("--expected-conclusion", choices=["success", "failure", "cancelled"], required=True)
     parser.add_argument("--app-id", type=int, default=15368)
+    parser.add_argument("--expected-state", choices=["success", "failure", "error"])
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--action-sha", required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -78,8 +98,6 @@ def main():
             if len(batch) < 100:
                 break
             page += 1
-    workflow = api(f"{prefix}/contents/.github/workflows/dco.yml?ref={run['head_sha']}")
-    source = base64.b64decode(workflow["content"]).decode("utf-8")
     errors = verify(run, jobs, checks, repository=args.repository, run_id=args.run_id,
                     head=args.head, conclusion=args.expected_conclusion, app_id=args.app_id, action_sha=args.action_sha)
     executed_jobs = [job for job in jobs if any("Certify" in step.get("name", "") for step in job.get("steps", []))]
@@ -88,6 +106,33 @@ def main():
     if f"Download action repository 'paintedwolf-ai/dco-checker@{args.action_sha}' (SHA:{args.action_sha})" not in logs:
         errors.append("runner logs do not attest downloading the requested immutable action SHA")
     identified = [check for check in checks if str(check.get("external_id", "")).startswith(f"dco:v2:{args.run_id}:{run.get('run_attempt', 1)}:")]
+    statuses = []
+    page = 1
+    while True:
+        batch = api(f"{prefix}/commits/{args.head}/statuses?per_page=100&page={page}")
+        statuses.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    expected_state = args.expected_state or ('success' if args.expected_conclusion == 'success' else 'failure')
+    errors += verify_gate(statuses, checks, run, expected_state)
+    caller_revision = None
+    for check in identified:
+        try:
+            raw = check["output"]["text"]
+            parsed = json.loads(raw[8:-4])
+            candidate = parsed.get("caller_revision")
+            if re.fullmatch(r"[0-9a-f]{40}", candidate or ""):
+                if caller_revision is not None and caller_revision != candidate:
+                    errors.append("execution checks disagree about immutable caller revision")
+                caller_revision = candidate
+        except (KeyError, ValueError, TypeError):
+            pass
+    if caller_revision is None:
+        errors.append("published provenance lacks immutable trusted caller revision")
+        caller_revision = run["head_sha"]
+    workflow = api(f"{prefix}/contents/.github/workflows/dco.yml?ref={caller_revision}")
+    source = base64.b64decode(workflow["content"]).decode("utf-8")
     if not args.allow_legacy_missing_run_link and any(run["html_url"] not in check.get("output", {}).get("summary", "") for check in identified):
         errors.append("published summary lacks the explicit certification workflow run link")
     if not args.allow_legacy_missing_run_link:
@@ -99,7 +144,7 @@ def main():
                 provenance = json.loads(text[8:-4])
                 expected = {"run_url": run["html_url"], "run_id": args.run_id,
                             "attempt": run.get("run_attempt", 1), "external_id": check["external_id"],
-                            "checker_revision": args.action_sha, "policy_version": "2",
+                            "checker_revision": args.action_sha, "policy_version": "2", "caller_revision": caller_revision,
                             "evidence_digest": check["external_id"].rsplit(":", 1)[-1]}
                 if any(str(provenance.get(key)) != str(value) for key, value in expected.items()):
                     errors.append("published execution provenance differs from the recorded action/run/evidence")
@@ -113,8 +158,10 @@ def main():
                 "target_head": args.head, "expected_conclusion": args.expected_conclusion,
                 "release_eligible": not args.allow_legacy_missing_run_link and not errors,
                 "legacy_missing_run_link_allowed": args.allow_legacy_missing_run_link,
-                "runner_logs": logs, "run": run, "jobs": jobs, "checks": checks, "caller_workflow": {"ref": run["head_sha"], "blob_sha": workflow["sha"], "source": source}, "errors": errors,
-                "limitations": ["this record does not demonstrate required-check ruleset enforcement"]}
+                "expected_state": expected_state, "statuses": statuses,
+                "runner_logs": logs, "run": run, "jobs": jobs, "checks": checks, "caller_workflow": {"ref": caller_revision, "blob_sha": workflow["sha"], "source": source}, "errors": errors,
+                "limitations": ["this record does not demonstrate required-context ruleset enforcement",
+                                "historical execution evidence is not a claim about the latest merge decision"]}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(document, indent=2) + "\n")
     print("; ".join(errors) if errors else f"Qualified {args.scenario}: {run['html_url']}")

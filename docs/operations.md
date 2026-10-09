@@ -20,7 +20,17 @@ claims about that final action. Attach reports and workflow/run links to the rel
 ## Consumer migration and rollback
 
 Select a reviewed supported SHA, update the caller pin, and observe certification
-on ready PRs plus merge groups if a queue is used. Configure `DCO-owned` with the
+on ready PRs plus merge groups if a queue is used. If the first caller is not yet
+on the default branch, explicitly dispatch its reviewed installation PR branch
+once GitHub has registered that workflow. Use `gh workflow run dco.yml --ref
+REVIEWED_BRANCH -f pull_request=PR_NUMBER --repo OWNER/REPO`. Inspect the exact
+caller revision, downloaded action SHA, original-commit audit, and required status
+before changing enforcement. This deliberate bootstrap uses the real certification
+implementation and repository Actions token; it does not publish an admission
+success through a different implementation. Normal manual rechecks target the
+default branch. If GitHub has not registered the new workflow, finish registration
+through its supported workflow events before attempting dispatch; do not substitute
+a fabricated status or remove other branch protections. Configure `DCO-owned` with the
 GitHub Actions app identity and verify ruleset API readback. Remove the old DCO
 requirement and uninstall the previous app once the replacement is active. Maintain
 one implementation and one required DCO context in each migrated repository.
@@ -41,9 +51,21 @@ No third-party Python package is required at runtime. Review GitHub API and host
 runner changes as part of releases. Retain Actions logs and qualification JSON with
 release records according to repository retention settings.
 
-Pending checks indicate incomplete certification, not approval. Inspect the linked
+Pending statuses and audit checks indicate incomplete certification, not approval. Inspect the linked
 run and dispatch a recheck after restoring API availability. Infrastructure failures
-are distinct from rejected sign-offs. Never treat a successful unrelated workflow
-job as DCO evidence. Serial execution can delay results under a large event burst;
+are distinct from rejected sign-offs. Never treat a successful unrelated workflow job as DCO evidence. Require the
+commit status gate rather than the Actions job or audit check; hosted qualification observed a successful custom Actions check on the exact head
+while GitHub still reported the required check as expected. GitHub attached that
+check to an older suite; the specific platform gating cause was not established.
+The commit status gate was independently proven to satisfy the app-bound requirement. Serial execution can delay results under a large event burst;
 obsolete events are skipped when reached, and new ready heads still require their
 own successful check.
+
+GitHub limits each context to 1,000 commit statuses per head. Certification starts
+only with capacity for its normal pending and terminal records plus one blocking
+recovery record. At the threshold it blocks certification and asks for a fresh
+signed head commit; it does not silently retain a prior successful gate while
+claiming to certify different evidence. A lost response is reconciled by exact
+run, attempt, evidence digest, and intended state instead of blindly appending
+another status. Permanent API denial may prevent a write; inspect the failed run
+and existing gate rather than treating the run as proof of a new certification.

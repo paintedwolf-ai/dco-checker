@@ -58,7 +58,7 @@ def main():
         api(f"{prefix}/git/refs/heads/{branch}", {"sha": configured["sha"], "force": False}, "PATCH")
     count = 251 if args.scenario == "unsigned-after-250" else 1
     head = configured["sha"]
-    changed_tree = api(f"{prefix}/git/trees", {"base_tree": tree["sha"], "tree": [{"path": f"qualification/{args.scenario}.txt", "mode": "100644", "type": "blob", "content": args.scenario + "\n"}]}, "POST")
+    changed_tree = api(f"{prefix}/git/trees", {"base_tree": tree["sha"], "tree": [{"path": f"qualification/{args.scenario}-{current[:12]}.txt", "mode": "100644", "type": "blob", "content": args.scenario + "\n"}]}, "POST")
     for number in range(1, count + 1):
         unsigned = args.scenario in {"unsigned", "unsigned-after-250"} and number == count
         commit = api(f"{prefix}/git/commits", {"message": f"Qualification {args.scenario} {number}" + ("" if unsigned else signoff),

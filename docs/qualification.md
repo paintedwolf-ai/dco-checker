@@ -24,8 +24,7 @@ python3 tests/qualification/create_case.py \
 The harness installs the caller and CI on the consumer's default branch using a
 signed commit, then creates an actual PR. Available cases are `signed`, `unsigned`,
 `unsigned-after-250`, and `draft`. The long inventory case has 251 original commits
-and an unsigned final commit; its required check must fail. Drafts must receive no
-check writes. The action is executed by GitHub Actions, reads real GitHub API data,
+and an unsigned final commit; its required check must fail. Drafts must receive no status or audit writes. The action is executed by GitHub Actions, reads real GitHub API data,
 and writes using the real repository workflow token. Deliberately unsigned fixture
 commits exist only in the disposable consumer.
 
@@ -39,13 +38,15 @@ python3 tests/qualification/record.py \
 ```
 
 The recorder verifies run identity, a composite certification step, exact check
-head, execution identity, terminal outcome, GitHub Actions app ID, evidence identity, and
-audit summary. GitHub rewrites Actions-created check URLs and may attach them to
-an existing app suite, so exact execution matching uses the structured external ID,
-not the check URL or suite ID. It preserves API run/job/check responses. It verifies the checker revision in the published audit summary and preserves
-the immutable caller source at the run head, verifying its full-SHA pin. It does not itself establish branch-rule enforcement. Read the configured
+head, required status outcome, GitHub Actions publisher identity, audit outcome,
+and the same execution/evidence identity in both gate and audit. GitHub rewrites Actions-created check URLs and may attach them to
+an existing app suite, so exact execution matching uses the audit external ID and the commit status target
+URL fragment, not the check URL or suite ID. It preserves API run/job/check responses. It verifies structured execution provenance, checker revision, and the immutable
+caller revision supplied by GitHub's workflow context, then preserves the caller
+source and verifies its full-SHA action pin. A pull_request_target run's head_sha
+can be the PR head, so it is not used to infer the trusted base workflow source. It does not itself establish branch-rule enforcement. Read the configured
 ruleset back and attempt the expected merge rejection/acceptance in the disposable
-consumer. Never interpret an Actions job result alone as the required DCO check.
+consumer. Never interpret an Actions job result alone as the required DCO status.
 
 ## Scenario matrix
 
@@ -53,8 +54,8 @@ Record the actual trigger and immutable SHAs for each scenario:
 
 | Boundary | Evidence required |
 | --- | --- |
-| Ordinary signed and unsigned PR | Exact-head success and failure checks from the composite action |
-| More than 250 commits | Failed check identifies unsigned contribution after 250 |
+| Ordinary signed and unsigned PR | Exact-head success and failure statuses plus audit checks from the composite action |
+| More than 250 commits | Failed gate and audit identify unsigned contribution after 250 |
 | Fork PR | Genuine fork association, base-repository token publication, no contribution execution |
 | Dependabot | Genuine Dependabot-generated PR and CI completion under actual token restrictions |
 | Draft transitions | No writes when draft is observed; ready transition certifies original commits |
@@ -78,3 +79,12 @@ genuine token-bearing Dependabot or queue qualification.
 Attach exact candidate/final SHAs, reports, ruleset readback, run URLs, and any
 unqualified scenarios to release evidence. Archive disposable repositories after
 preserving reports and links; delete only under explicit maintainer direction.
+
+The required status context is `DCO-owned`, and the rich audit check is `DCO audit`.
+Use fresh contribution heads when qualifying the status architecture: GitHub
+requires both a status and a check if they share the required name, so historical
+checks from the earlier candidate can affect the same head's merge decision.
+Record that platform behavior and use new fixture heads rather than relabeling a
+legacy failed check as successful. A deliberate test-only admission publisher must
+be visibly distinguished from real certification and must never be installed in
+production. Queue rejection must come from the real original-commit evaluation.

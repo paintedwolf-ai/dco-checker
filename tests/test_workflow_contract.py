@@ -89,8 +89,10 @@ class WorkflowContracts(unittest.TestCase):
                                  {'group': 'dco-certification', 'queue': 'max', 'cancel-in-progress': False})
                 self.assertEqual(set(workflow['on']), {'pull_request_target','workflow_run','merge_group','workflow_dispatch'})
                 self.assertEqual(workflow['permissions'],
-                                 {'contents': 'read','pull-requests': 'read','actions': 'read','checks': 'write'})
+                                 {'contents': 'read','pull-requests': 'read','actions': 'read','checks': 'write','statuses': 'write'})
                 self.assertEqual(workflow['jobs']['certify']['runs-on'], 'ubuntu-24.04')
+                self.assertEqual(workflow['jobs']['certify']['if'],
+                    "(github.event_name != 'pull_request_target' || (github.event.pull_request.draft == false && github.actor != 'dependabot[bot]')) && (github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request')")
 
     def test_legal_concurrency_fixtures(self):
         for value in ['fixed-group', '${{ github.workflow }}', {'group':'fixed'},

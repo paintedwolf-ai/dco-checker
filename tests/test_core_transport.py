@@ -80,3 +80,17 @@ class TransportTests(unittest.TestCase):
         with self.assertRaisesRegex(APIError, "body unavailable"):
             Transport("secret", opener=opener, timeout=0.005).request("repos/org/repo")
         self.assertEqual(opener.open.call_count, 1)
+
+    def test_audit_name_is_encoded_through_real_transport(self):
+        from dco_checker.checks import Audit
+        from dco_checker.engine import Config, make_evidence
+        from dco_checker.evidence import GitHub
+        opener = Mock()
+        opener.open.return_value = Response(b'{"total_count":0,"check_runs":[]}')
+        api = GitHub('org/repo', Transport('secret', opener=opener))
+        evidence = make_evidence('org/repo', 'a'*40, [], None, 'b'*40, 'c'*40)
+        config = Config('b'*40, 10, 1, 'https://github.com/org/repo/actions/runs/10', 'c'*40)
+        self.assertIsNone(Audit(api, 'a'*40, evidence, config).reconcile())
+        url = opener.open.call_args.args[0].full_url
+        self.assertIn('check_name=DCO+audit', url)
+        self.assertNotIn(' ', url)

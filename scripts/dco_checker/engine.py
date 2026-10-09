@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from . import Draft, Obsolete, POLICY_VERSION, Refused
-from .checks import Publisher
+from .publication import Publication
 from .evidence import SHA, queue_members
 from .policy import evaluate, render
 
@@ -15,9 +15,12 @@ class Config:
     run_id: int
     attempt: int
     run_url: str
+    caller_revision: str
     ci_workflow: str = "ci.yml"
 
     def __post_init__(self):
+        if not isinstance(self.caller_revision, str) or not SHA.fullmatch(self.caller_revision):
+            raise Refused("DCO_CALLER_REVISION must be the full immutable executed caller SHA")
         if not SHA.fullmatch(self.revision):
             raise Refused("DCO_CHECKER_REVISION must be the full immutable action SHA")
         if type(self.run_id) is not int or self.run_id <= 0 or type(self.attempt) is not int or self.attempt <= 0:
@@ -133,9 +136,9 @@ def revalidate(github, sha, members, group):
             raise Obsolete("Same-head PR contexts changed during certification")
 
 
-def make_evidence(repository, sha, members, group, revision):
+def make_evidence(repository, sha, members, group, revision, caller_revision):
     evidence = {"repository": repository, "sha": sha, "members": members, "group": group,
-                "revision": revision, "policy": POLICY_VERSION}
+                "revision": revision, "caller_revision": caller_revision, "policy": POLICY_VERSION}
     evidence["digest"] = hashlib.sha256(json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return evidence
 
@@ -147,15 +150,15 @@ def run(github, event_name, event, config):
             raise Refused("Run URL must match the publishing repository and run ID")
         sha, members, group = select(github, event_name, event, config)
         revalidate(github, sha, members, group)
-        evidence = make_evidence(github.repository, sha, members, group, config.revision)
-        publisher = Publisher(github, sha, evidence, config)
+        evidence = make_evidence(github.repository, sha, members, group, config.revision, config.caller_revision)
+        publisher = Publication(github, sha, evidence, config)
         publisher.start()
-        if publisher.check.get("status") == "completed":
+        if publisher.reusable:
             # Duplicate delivery of this execution can reuse unchanged complete
             # evidence. Manual retries use a new run/attempt and create pending.
             print("Reused completed certification for identical immutable evidence")
             print(publisher.check.get("output", {}).get("summary", ""))
-            return 0 if publisher.check.get("conclusion") == "success" else 1
+            return 0 if publisher.gate.latest["state"] == "success" else 1
         # Reserve a minute of the total HTTP budget for terminal publication.
         transport = getattr(github, "transport", None)
         deadline = getattr(transport, "deadline", None)
@@ -172,7 +175,7 @@ def run(github, event_name, event, config):
         for result in results:
             print("DCO evaluation: " + json.dumps(asdict(result), sort_keys=True))
         summary = render(github.repository, evidence, results)
-        publisher.finish(conclusion, summary)
+        publisher.finish(conclusion, summary, "All original PR commits satisfy DCO policy" if conclusion == "success" else "Original PR commits have missing or invalid DCO sign-offs")
         print(summary)
         return 0 if conclusion == "success" else 1
     except Draft as error:
@@ -200,7 +203,11 @@ def fail(github, publisher, evidence, results, error):
             if github.pull(member["number"])["isDraft"]:
                 print("Draft observed; pending check left untouched")
                 return 1
-        publisher.finish("failure", render(github.repository, evidence, results, error=message))
+        recovered = publisher.recover_terminal()
+        if recovered is not None:
+            print("Recovered terminal DCO publication for this complete evidence")
+            return 0 if recovered == "success" else 1
+        publisher.finish("error", render(github.repository, evidence, results, error=message), "DCO evidence unavailable or changed; inspect certification run")
     except (Refused, KeyError, TypeError, ValueError, AttributeError) as publication_error:
         print("Terminal publication unavailable: " + str(publication_error))
     return 1
