@@ -31,8 +31,9 @@ Each result records repository, original PR identities, base/head SHAs, checker
 revision, and policy version. Commit inventories use complete immutable paginated
 comparisons, including contributions after position 250. Merge groups map their
 structured queue ancestry to original member PRs; synthetic queue sign-offs do
-not substitute for original certification. All open PR contexts sharing a head
-are evaluated together.
+not substitute for original certification. Complete paginated repository open-PR inventories supply all contexts sharing a
+head, including genuine fork heads omitted by GitHub's commit-association REST
+endpoint. Those contexts are evaluated together and revalidated before publication.
 
 A current ready target receives a pending check before scanning and a terminal
 update on that same check. Interrupted scans remain pending until another run

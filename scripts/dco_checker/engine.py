@@ -87,7 +87,7 @@ def select(github, event_name, event, config):
         sha = current["headRefOid"]
         members = github.contexts(sha)
         if current not in members:
-            raise Refused("Current PR is absent from live commit associations")
+            raise Refused("Current PR is absent from the complete open PR inventory")
     for member in members:
         if member["isDraft"]:
             raise Draft("A PR sharing this certification target is draft; check left untouched")

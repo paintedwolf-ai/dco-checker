@@ -39,8 +39,10 @@ python3 tests/qualification/record.py \
 ```
 
 The recorder verifies run identity, a composite certification step, exact check
-head, run link, terminal outcome, GitHub Actions app ID, evidence identity, and
-audit summary. It preserves API run/job/check responses. It verifies the checker revision in the published audit summary and preserves
+head, execution identity, terminal outcome, GitHub Actions app ID, evidence identity, and
+audit summary. GitHub rewrites Actions-created check URLs and may attach them to
+an existing app suite, so exact execution matching uses the structured external ID,
+not the check URL or suite ID. It preserves API run/job/check responses. It verifies the checker revision in the published audit summary and preserves
 the immutable caller source at the run head, verifying its full-SHA pin. It does not itself establish branch-rule enforcement. Read the configured
 ruleset back and attempt the expected merge rejection/acceptance in the disposable
 consumer. Never interpret an Actions job result alone as the required DCO check.

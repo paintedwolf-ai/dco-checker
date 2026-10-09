@@ -1,0 +1,63 @@
+{
+  "fixture_kind": "recorded-live-read-only",
+  "recorded_date": "2026-10-09",
+  "source": "https://github.com/paintedwolf-ai/dco-checker-qualification/pull/4",
+  "graphql": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "number": 4,
+          "headRefOid": "a5e0a119996f2c43c3b165a9a2abf5233a202b84",
+          "baseRefOid": "c5bbc17eabc1ffe379db017fb5feffbbf1362d74",
+          "isDraft": false,
+          "state": "OPEN"
+        },
+        "pullRequests": {
+          "totalCount": 5,
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAR5rE0g="
+          },
+          "nodes": [
+            {
+              "number": 1,
+              "headRefOid": "1381baa4c5d98d735f8838c2496f23121af2a41d",
+              "baseRefOid": "c5bbc17eabc1ffe379db017fb5feffbbf1362d74",
+              "isDraft": false,
+              "state": "OPEN"
+            },
+            {
+              "number": 2,
+              "headRefOid": "dc89ecc3bf50e0798862bf590d132349cb6931cd",
+              "baseRefOid": "c5bbc17eabc1ffe379db017fb5feffbbf1362d74",
+              "isDraft": false,
+              "state": "OPEN"
+            },
+            {
+              "number": 3,
+              "headRefOid": "5d0c48ddae0c882c575729b69ac8e86242b1da41",
+              "baseRefOid": "c5bbc17eabc1ffe379db017fb5feffbbf1362d74",
+              "isDraft": true,
+              "state": "OPEN"
+            },
+            {
+              "number": 4,
+              "headRefOid": "a5e0a119996f2c43c3b165a9a2abf5233a202b84",
+              "baseRefOid": "c5bbc17eabc1ffe379db017fb5feffbbf1362d74",
+              "isDraft": false,
+              "state": "OPEN"
+            },
+            {
+              "number": 5,
+              "headRefOid": "ec92e01443ff835a373569e7b325716678ba1626",
+              "baseRefOid": "c5bbc17eabc1ffe379db017fb5feffbbf1362d74",
+              "isDraft": false,
+              "state": "OPEN"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "rest_commit_pulls": []
+}

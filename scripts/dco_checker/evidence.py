@@ -10,12 +10,26 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 def snapshot(value):
     if not isinstance(value, dict):
         raise Refused("Missing pull request snapshot")
-    result = {key: value[key] for key in ("number", "headRefOid", "baseRefOid", "isDraft", "state")}
+    fields = ("number", "headRefOid", "baseRefOid", "isDraft", "state")
+    if not all(key in value for key in fields):
+        raise Refused("Incomplete pull request snapshot")
+    result = {key: value[key] for key in fields}
     if (type(result["number"]) is not int or result["number"] <= 0 or
-        not all(SHA.fullmatch(result[key]) for key in ("headRefOid", "baseRefOid")) or
+        not all(isinstance(result[key], str) and SHA.fullmatch(result[key]) for key in ("headRefOid", "baseRefOid")) or
         type(result["isDraft"]) is not bool or result["state"] not in ("OPEN", "CLOSED", "MERGED")):
         raise Refused("Malformed pull request snapshot")
     return result
+
+
+def validate_connection(connection):
+    if (not isinstance(connection, dict) or type(connection.get("totalCount")) is not int or
+        connection["totalCount"] < 0 or not isinstance(connection.get("nodes"), list) or
+        not isinstance(connection.get("pageInfo"), dict)):
+        raise Refused("Malformed paginated inventory")
+    page = connection["pageInfo"]
+    if (type(page.get("hasNextPage")) is not bool or
+        (page.get("endCursor") is not None and not isinstance(page["endCursor"], str))):
+        raise Refused("Malformed pagination authority")
 
 
 def next_page(connection, cursor):
@@ -52,22 +66,35 @@ class GitHub:
         return snapshot(self.query("pullRequest(number:$number){" + PR_FIELDS + "}", number=number)["pullRequest"])
 
     def contexts(self, sha):
-        # REST commit association includes contexts across different target branches.
-        found, seen, page = [], set(), 1
+        # Commit-to-PR associations are incomplete for fork heads. The base
+        # repository's complete open PR inventory is the authority for every
+        # context that can consume a check attached to this SHA.
+        if not isinstance(sha, str) or not SHA.fullmatch(sha):
+            raise Refused("Invalid target SHA for open PR inventory")
+        found, seen, cursor, total = [], set(), None, None
         while True:
-            nodes = self.api(f"repos/{self.repository}/commits/{sha}/pulls?per_page=100&page={page}")
-            if not isinstance(nodes, list):
-                raise Refused("Malformed commit PR associations")
-            for node in nodes:
-                if node["number"] in seen:
-                    raise Refused("Duplicate commit PR association")
-                seen.add(node["number"])
-                current = self.pull(node["number"])
-                if current["state"] == "OPEN" and current["headRefOid"] == sha:
+            connection = self.query(
+                "pullRequests(first:100,after:$cursor,states:[OPEN],orderBy:{field:CREATED_AT,direction:ASC}){" +
+                PAGE + " nodes{" + PR_FIELDS + "}}", cursor=cursor)["pullRequests"]
+            validate_connection(connection)
+            if total is not None and total != connection["totalCount"]:
+                raise Refused("Open PR inventory changed during pagination")
+            total = connection["totalCount"]
+            for node in connection["nodes"]:
+                current = snapshot(node)
+                if current["state"] != "OPEN" or current["number"] in seen:
+                    raise Refused("Closed or repeated PR in open PR inventory")
+                seen.add(current["number"])
+                if current["headRefOid"] == sha:
                     found.append(current)
-            if len(nodes) < 100:
-                return sorted(found, key=lambda pr: pr["number"])
-            page += 1
+            if len(seen) > total:
+                raise Refused("Open PR inventory exceeds declared count")
+            cursor = next_page(connection, cursor)
+            if cursor is None:
+                break
+        if len(seen) != total:
+            raise Refused("Incomplete open PR inventory")
+        return sorted(found, key=lambda pr: pr["number"])
 
     def commits(self, expected):
         commits, seen, total, page = [], set(), None, 1
@@ -106,6 +133,7 @@ class GitHub:
             if queue is None:
                 raise Refused("Merge queue is unavailable")
             connection = queue["entries"]
+            validate_connection(connection)
             if total is not None and total != connection["totalCount"]:
                 raise Refused("Merge queue changed during pagination")
             total = connection["totalCount"]

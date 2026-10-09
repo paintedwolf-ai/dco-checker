@@ -10,7 +10,8 @@ responses, and sanitized error diagnostics.
 ## Event authority
 
 `pull_request_target` executes the base repository caller. The checker rereads the
-live PR, captures its original immutable commits, and validates state before final
+live PR and complete repository open-PR inventory, captures its original immutable
+commits across every same-head context, and validates state before final
 publication. `workflow_run` executes the default-branch caller and rereads the
 completed CI run, workflow identity, repository, and exact PR association; stale
 heads are ignored. `workflow_dispatch` is a maintainer-triggered default-branch
