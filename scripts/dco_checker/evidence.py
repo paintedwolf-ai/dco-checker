@@ -119,7 +119,11 @@ class GitHub:
                     raise Refused("Invalid or repeated comparison commit")
                 seen.add(node["sha"])
                 raw = node["commit"]
-                if not isinstance(raw["message"], str) or not isinstance(node["parents"], list):
+                parents = node["parents"]
+                if (not isinstance(raw["message"], str) or not isinstance(parents, list) or
+                    any(not isinstance(parent, dict) or not isinstance(parent.get("sha"), str) or
+                        not SHA.fullmatch(parent["sha"]) for parent in parents) or
+                    len({parent["sha"] for parent in parents}) != len(parents)):
                     raise Refused("Malformed commit evidence")
                 commits.append({"oid": node["sha"], "message": raw["message"], "author": raw["author"],
                     "committer": raw["committer"], "parents": {"totalCount": len(node["parents"])}, "githubAuthor": node.get("author")})

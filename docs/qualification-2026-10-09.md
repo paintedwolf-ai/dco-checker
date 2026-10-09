@@ -114,6 +114,7 @@ Certification now captures the protected branch head with the queue inventory
 and traverses every prefix to that root. The event base must occur on that
 ancestry but does not terminate traversal. Immutable Git parent edges must
 corroborate queue metadata. Root changes, withdrawn prefixes, or rewritten
-metadata refuse success. The updated suite has 77 tests; genuine cumulative
+metadata refuse success. The updated suite has 79 tests, including malformed-parent refusal and
+independent recomputation of published evidence digests; genuine cumulative
 queue qualification with retained webhook payloads remains required before
 release.

@@ -156,6 +156,9 @@ def run(github, event_name, event, config):
         sha, members, group = select(github, event_name, event, config)
         revalidate(github, sha, members, group)
         evidence = make_evidence(github.repository, sha, members, group, config.revision, config.caller_revision)
+        # These immutable identifiers contain no credentials. Preserve the exact
+        # digest inputs for independent qualification, including bounded UI omissions.
+        print("DCO evidence: " + json.dumps(evidence, sort_keys=True, separators=(",", ":")))
         publisher = Publication(github, sha, evidence, config)
         publisher.start()
         if publisher.reusable:

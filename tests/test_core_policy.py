@@ -50,3 +50,7 @@ class PolicyTests(unittest.TestCase):
         for field, replacement in [('root', 'f'*40), ('event_base', 'd'*40)]:
             changed = make_evidence('org/repo', 'a'*40, [], {**group, field: replacement}, 'b'*40, 'c'*40)
             self.assertNotEqual(original['digest'], changed['digest'])
+        output = render('org/repo', original, [])
+        self.assertIn('Protected root: `' + group['root'] + '`', output)
+        self.assertIn('event base checkpoint: `' + group['event_base'] + '`', output)
+        self.assertIn('Queue branch: main', output)

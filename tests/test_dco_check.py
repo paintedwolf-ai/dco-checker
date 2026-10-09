@@ -1,5 +1,6 @@
 """Independent execution-level certification contracts; no contribution code runs."""
 import copy
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -84,6 +85,19 @@ class ExecutionContracts(unittest.TestCase):
         config = Config(sha(900), run_id, 1, f'https://github.com/org/repo/actions/runs/{run_id}', sha(901))
         with redirect_stdout(io.StringIO()):
             return run(github, event, payload or {'inputs': {'pull_request': '1'}}, config)
+
+    def test_logged_evidence_independently_recomputes_published_digest(self):
+        github = Consumer()
+        output = io.StringIO()
+        config = Config(sha(900), 10, 1, 'https://github.com/org/repo/actions/runs/10', sha(901))
+        with redirect_stdout(output):
+            self.assertEqual(run(github, 'workflow_dispatch', {'inputs': {'pull_request': '1'}}, config), 0)
+        evidence = json.loads(next(line.removeprefix('DCO evidence: ') for line in output.getvalue().splitlines()
+                                   if line.startswith('DCO evidence: ')))
+        digest = evidence.pop('digest')
+        self.assertEqual(hashlib.sha256(json.dumps(evidence, sort_keys=True, separators=(',', ':')).encode()).hexdigest(), digest)
+        self.assertTrue(github.statuses[-1]['target_url'].endswith(':' + digest))
+        self.assertTrue(github.checks[-1]['external_id'].endswith(':' + digest))
 
     def test_duplicate_delivery_converges_on_identified_check(self):
         github = Consumer()
@@ -214,6 +228,22 @@ class ExecutionContracts(unittest.TestCase):
                 transport.request = lambda *a, **kw: response
                 with self.assertRaises(Refused):
                     GitHub('org/repo', transport).commits(pull())
+
+    def test_malformed_parent_inventory_cannot_grant_merge_exemption(self):
+        for parents in ([None, None], [{}, {}], [{'sha': 'wrong'}, {'sha': sha(0)}],
+                        [{'sha': sha(0)}, {'sha': sha(0)}], None):
+            with self.subTest(parents=parents):
+                github = Consumer()
+                unsigned = commit(sha(1), signed=False)
+                response = dict(base_commit={'sha': sha(1000)}, total_commits=1, commits=[dict(sha=sha(1),
+                    commit={key: unsigned[key] for key in ('message', 'author', 'committer')},
+                    author=unsigned['githubAuthor'], parents=parents)])
+                transport = type('Recorded', (), {})()
+                transport.request = lambda *args, **kwargs: response
+                github.commits = GitHub('org/repo', transport).commits
+                self.assertEqual(self.execute(github), 1)
+                self.assertEqual(github.statuses[-1]['state'], 'error')
+                self.assertNotEqual(github.checks[-1]['conclusion'], 'success')
 
     def test_queue_membership_disappearing_never_finishes_success(self):
         github = Consumer()
