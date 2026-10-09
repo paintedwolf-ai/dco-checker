@@ -82,8 +82,9 @@ def main():
     source = base64.b64decode(workflow["content"]).decode("utf-8")
     errors = verify(run, jobs, checks, repository=args.repository, run_id=args.run_id,
                     head=args.head, conclusion=args.expected_conclusion, app_id=args.app_id, action_sha=args.action_sha)
-    logs = subprocess.run(["gh", "run", "view", str(args.run_id), "--repo", args.repository, "--log"],
-                          capture_output=True, text=True, check=True, timeout=60).stdout
+    executed_jobs = [job for job in jobs if any("Certify" in step.get("name", "") for step in job.get("steps", []))]
+    logs = "\n".join(subprocess.run(["gh", "run", "view", "--job", str(job["id"]), "--repo", args.repository, "--log"],
+                       capture_output=True, text=True, check=True, timeout=60).stdout for job in executed_jobs)
     if f"Download action repository 'paintedwolf-ai/dco-checker@{args.action_sha}' (SHA:{args.action_sha})" not in logs:
         errors.append("runner logs do not attest downloading the requested immutable action SHA")
     identified = [check for check in checks if str(check.get("external_id", "")).startswith(f"dco:v2:{args.run_id}:{run.get('run_attempt', 1)}:")]

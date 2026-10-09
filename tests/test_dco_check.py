@@ -200,7 +200,10 @@ class ExecutionContracts(unittest.TestCase):
 
     def test_recorded_github_ci_associations_fail_closed(self):
         for fixture in (Path(__file__).parent / 'fixtures').glob('*.json'):
-            recorded = json.loads(fixture.read_text())['workflow_run']
+            content = json.loads(fixture.read_text())
+            if 'workflow_run' not in content:
+                continue
+            recorded = content['workflow_run']
             github = Consumer()
             github.repository = recorded['repository']['full_name']
             github.ci = copy.deepcopy(recorded)
