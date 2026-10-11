@@ -181,7 +181,7 @@ class CommitInventoryTests(unittest.TestCase):
         github = GitHub('org/repo', Mock())
         github.api = Mock(side_effect=[self.response([self.node(n) for n in range(1, 101)]),
                                       self.response([self.node(101)])])
-        stream = github.commits(pull(head=f'{101:040x}'))
+        stream = github.commits(pull(1, head=f'{101:040x}'))
         self.assertEqual(next(stream)['oid'], f'{1:040x}')
         self.assertEqual(github.api.call_count, 1)
         self.assertEqual(len(list(stream)), 100)
@@ -196,10 +196,10 @@ class CommitInventoryTests(unittest.TestCase):
                 github = GitHub('org/repo', Mock())
                 github.api = Mock(side_effect=[first, last])
                 with self.assertRaises(Refused):
-                    list(github.commits(pull(head=f'{101:040x}')))
+                    list(github.commits(pull(1, head=f'{101:040x}')))
 
     def test_oversized_first_page_is_refused(self):
         github = GitHub('org/repo', Mock())
         github.api = Mock(return_value=self.response([self.node(n) for n in range(1, 102)]))
         with self.assertRaises(Refused):
-            list(github.commits(pull(head=f'{101:040x}')))
+            list(github.commits(pull(1, head=f'{101:040x}')))
