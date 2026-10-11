@@ -1,7 +1,8 @@
 # Hosted qualification, 2026-10-09
 
-This record covers development candidate
-`8c8e1ebd5dec2450ccc0796807b24ba9d9dc6f62`, not a supported final release SHA.
+This record distinguishes development candidates and platform probes from final
+release qualification. The first candidate was
+`8c8e1ebd5dec2450ccc0796807b24ba9d9dc6f62`.
 The disposable public consumer is
 [paintedwolf-ai/dco-checker-qualification](https://github.com/paintedwolf-ai/dco-checker-qualification).
 Its caller pinned the full candidate SHA. Actual runner logs identified the
@@ -77,3 +78,54 @@ app binding and suite independence; the test-only success is not DCO certificati
 The resulting shipped architecture uses a required `DCO-owned` commit status and
 a distinct `DCO audit` rich check. Final qualification must verify both against
 the same immutable evidence and actual downloaded release SHA.
+
+## Canonical status candidate 7a0e11
+
+Candidate `7a0e11d8cf7d46d946bd151b99c234cc71431eef` passed strict
+recording of the required status, distinct audit, evidence digest, actual caller
+revision, and downloaded action revision:
+
+| Scenario | Hosted evidence | Result |
+| --- | --- | --- |
+| Signed original contribution | [run 37988196265](https://github.com/paintedwolf-ai/dco-checker-qualification/actions/runs/37988196265) | Success |
+| Fresh unsigned contribution | [run 37988460330](https://github.com/paintedwolf-ai/dco-checker-qualification/actions/runs/37988460330) | Failed status and audit |
+| Genuine fork direct event | [run 37988483587](https://github.com/paintedwolf-ai/dco-checker-qualification/actions/runs/37988483587) | Success |
+| Authentic fork CI with empty PR associations | [run 37988499368](https://github.com/paintedwolf-ai/dco-checker-qualification/actions/runs/37988499368) | Success after complete live inventory |
+| Fresh merge-group head under required status app binding | [run 37987684566](https://github.com/paintedwolf-ai/dco-checker-qualification/actions/runs/37987684566) | Success; queue accepted status from app 15368 |
+
+The candidate's hosted CI passed 70 behavior and workflow contracts on Python
+3.11–3.14 plus workflow lint. Bootstrap PR 10 was squash merged as
+`736a365bc68ac489e49c55ee455a1ba57a37ad84`; its author and final DCO trailer
+were verified after merging. Candidate evidence does not certify that different
+squashed SHA. Final release evidence must use the exact released SHA and preserve
+the additional long-inventory, draft, bot, and queue observations.
+
+
+## Cumulative queue boundary correction
+
+Negative qualification of the canonical candidate exposed a stale cumulative
+queue group whose Git ancestry still contained unsigned PR 11, while its audit
+listed only signed PR 13. The group was rebuilt and did not merge. The original
+webhook payload was not retained; its event base is inferred from immutable Git
+parents and audit behavior, and is not presented as a captured field. The
+recorded regression fixture labels those inferences and replay assumptions.
+
+Certification now captures the protected branch head with the queue inventory
+and traverses every prefix to that root. The event base must occur on that
+ancestry but does not terminate traversal. Immutable Git parent edges must
+corroborate queue metadata. Root changes, withdrawn prefixes, or rewritten
+metadata refuse success. The updated suite has 79 tests, including malformed-parent refusal and
+independent recomputation of published evidence digests; genuine cumulative
+queue qualification with retained webhook payloads remains required before
+release.
+
+
+Candidate `76373c28e004ca4d2b9728bcbcecf87c4cc262fb` passed genuine
+two-member cumulative qualification in
+[run 37990175214](https://github.com/paintedwolf-ai/dco-checker-qualification/actions/runs/37990175214).
+The retained webhook event base was the preceding synthetic entry, rather than
+the protected root. The audit included both original PRs 15 and 18, and the
+recorder independently reconstructed their full captured queue prefix and
+recomputed the digest shared by audit and required status. This establishes the
+new captured event behavior; it does not retroactively turn the earlier inferred
+payload into recorded evidence.

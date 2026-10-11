@@ -5,7 +5,7 @@ import json
 import re
 from . import Draft, Obsolete, POLICY_VERSION, Refused
 from .publication import Publication
-from .evidence import SHA, queue_members
+from .evidence import SHA
 from .policy import evaluate, render
 
 
@@ -75,8 +75,10 @@ def select(github, event_name, event, config):
         branch = captured["base_ref"]
         if not branch.startswith("refs/heads/") or not SHA.fullmatch(base) or not SHA.fullmatch(sha):
             raise Refused("Malformed merge group identity")
-        group = (branch.removeprefix("refs/heads/"), base, sha)
-        members = queue_members(github.queue(group[0]), base, sha)
+        branch = branch.removeprefix("refs/heads/")
+        inventory = github.queue(branch)
+        group = {"branch": branch, "root": inventory.root, "event_base": base, "head": sha}
+        members = github.queue_members(inventory, base, sha)
         for member in members:
             current = github.pull(member["number"])
             if current["isDraft"]:
@@ -125,7 +127,10 @@ def revalidate(github, sha, members, group):
         if current != member:
             raise Obsolete("PR generation changed during certification")
     if group:
-        queued = queue_members(github.queue(group[0]), group[1], group[2])
+        inventory = github.queue(group["branch"])
+        if inventory.root != group["root"]:
+            raise Obsolete("Protected branch root changed during certification")
+        queued = github.queue_members(inventory, group["event_base"], group["head"])
         if sorted(queued, key=lambda member: member["number"]) != members:
             raise Obsolete("Merge group membership changed during certification")
     else:
@@ -151,6 +156,9 @@ def run(github, event_name, event, config):
         sha, members, group = select(github, event_name, event, config)
         revalidate(github, sha, members, group)
         evidence = make_evidence(github.repository, sha, members, group, config.revision, config.caller_revision)
+        # These immutable identifiers contain no credentials. Preserve the exact
+        # digest inputs for independent qualification, including bounded UI omissions.
+        print("DCO evidence: " + json.dumps(evidence, sort_keys=True, separators=(",", ":")))
         publisher = Publication(github, sha, evidence, config)
         publisher.start()
         if publisher.reusable:
