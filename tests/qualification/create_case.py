@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--repository", required=True)
     parser.add_argument("--action-sha", required=True)
     parser.add_argument("--scenario", choices=["signed", "unsigned", "unsigned-after-250", "draft"], required=True)
+    parser.add_argument("--commit-count", type=int, help="Original commits to create; defaults to 251 for unsigned-after-250, otherwise 1")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--skip-install", action="store_true", help="Use existing reviewed default-branch callers installed via Git SSH")
     args = parser.parse_args()
@@ -35,6 +36,9 @@ def main():
         parser.error("repository must be an explicitly named disposable DCO qualification repository")
     if not re.fullmatch(r"[0-9a-f]{40}", args.action_sha):
         parser.error("action-sha must be a full immutable SHA")
+    count = args.commit_count if args.commit_count is not None else (251 if args.scenario == "unsigned-after-250" else 1)
+    if count < 1 or (args.scenario == "unsigned-after-250" and count <= 250):
+        parser.error("commit-count must be positive and exceed 250 for unsigned-after-250")
     prefix = f"repos/{args.repository}"
     repository = api(prefix)
     branch = repository["default_branch"]
@@ -56,7 +60,6 @@ def main():
         configured = api(f"{prefix}/git/commits", {"message": "Install qualification caller" + signoff,
                          "tree": tree["sha"], "parents": [current], "author": identity, "committer": identity}, "POST")
         api(f"{prefix}/git/refs/heads/{branch}", {"sha": configured["sha"], "force": False}, "PATCH")
-    count = 251 if args.scenario == "unsigned-after-250" else 1
     head = configured["sha"]
     changed_tree = api(f"{prefix}/git/trees", {"base_tree": tree["sha"], "tree": [{"path": f"qualification/{args.scenario}-{current[:12]}.txt", "mode": "100644", "type": "blob", "content": args.scenario + "\n"}]}, "POST")
     for number in range(1, count + 1):

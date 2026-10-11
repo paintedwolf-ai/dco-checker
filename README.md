@@ -41,7 +41,16 @@ Checks UI rerun requests are not an action input; dispatch the workflow instead.
 
 Each result records repository, original PR identities, base/head SHAs, checker
 revision, trusted caller revision, and policy version. Commit inventories use complete immutable paginated
-comparisons, including contributions after position 250. Merge groups map their
+comparisons, including contributions after position 250. There is no fixed commit-count
+limit: each 100-commit page is evaluated in full, and commit bodies are released as
+the scan advances. Duplicate OIDs, inconsistent totals, missing pages, and a missing
+head refuse certification; a signed prefix can never certify a truncated PR.
+Deterministic tests cover signed and unsigned histories through 10,001 commits.
+API rate limits, the action's ten-minute HTTP budget (including terminal publication),
+and the caller's job timeout still bound each execution. If those resources are
+exhausted, certification fails closed; recheck using manual dispatch after resolving
+the resource constraint. A release SHA remains immutable, so consumers must update
+their full-SHA pin to receive later improvements. Merge groups map their
 complete structured queue ancestry to original member PRs, anchored at the
 protected branch head and corroborated by immutable Git parent edges. The event
 base may already contain earlier queued contributions; it is an ancestry

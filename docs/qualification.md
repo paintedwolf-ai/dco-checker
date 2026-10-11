@@ -24,7 +24,11 @@ python3 tests/qualification/create_case.py \
 The harness installs the caller and CI on the consumer's default branch using a
 signed commit, then creates an actual PR. Available cases are `signed`, `unsigned`,
 `unsigned-after-250`, and `draft`. The long inventory case has 251 original commits
-and an unsigned final commit; its required check must fail. Drafts must receive no status or audit writes. The action is executed by GitHub Actions, reads real GitHub API data,
+and an unsigned final commit; its required check must fail. Pass `--commit-count N`
+to qualify larger histories without changing the harness; for example, run `signed`
+and `unsigned-after-250` with `--commit-count 1001` to exercise eleven API pages.
+Record the actual count, full candidate SHA, and gate/audit results. Local 10,001-commit
+regressions prove pagination and evaluation contracts, not hosted runtime capacity. Drafts must receive no status or audit writes. The action is executed by GitHub Actions, reads real GitHub API data,
 and writes using the real repository workflow token. Deliberately unsigned fixture
 commits exist only in the disposable consumer.
 

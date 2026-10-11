@@ -104,7 +104,9 @@ class GitHub:
         return sorted(found, key=lambda pr: pr["number"])
 
     def commits(self, expected):
-        commits, seen, total, page = [], set(), None, 1
+        # Stream commit bodies one page at a time; only OIDs are retained for
+        # completeness and duplicate detection. Exhaustion is required to certify.
+        seen, total, page = set(), None, 1
         while True:
             response = self.api(f"repos/{self.repository}/compare/{expected['baseRefOid']}...{expected['headRefOid']}?per_page=100&page={page}")
             if response["base_commit"]["sha"] != expected["baseRefOid"]:
@@ -114,6 +116,8 @@ class GitHub:
                 raise Refused("Comparison commit count changed or is invalid")
             total = count
             nodes = response["commits"]
+            if not isinstance(nodes, list) or len(nodes) > 100 or len(seen) + len(nodes) > total:
+                raise Refused("Malformed or oversized comparison page")
             for node in nodes:
                 if not SHA.fullmatch(node["sha"]) or node["sha"] in seen:
                     raise Refused("Invalid or repeated comparison commit")
@@ -125,16 +129,15 @@ class GitHub:
                         not SHA.fullmatch(parent["sha"]) for parent in parents) or
                     len({parent["sha"] for parent in parents}) != len(parents)):
                     raise Refused("Malformed commit evidence")
-                commits.append({"oid": node["sha"], "message": raw["message"], "author": raw["author"],
-                    "committer": raw["committer"], "parents": {"totalCount": len(node["parents"])}, "githubAuthor": node.get("author")})
-            if len(commits) == total:
+                yield {"oid": node["sha"], "message": raw["message"], "author": raw["author"],
+                    "committer": raw["committer"], "parents": {"totalCount": len(node["parents"])}, "githubAuthor": node.get("author")}
+            if len(seen) == total:
                 break
-            if len(nodes) != 100 or len(commits) > total:
+            if len(nodes) != 100:
                 raise Refused("Incomplete paginated comparison")
             page += 1
-        if not commits or expected["headRefOid"] not in seen:
+        if not seen or expected["headRefOid"] not in seen:
             raise Refused("Comparison omitted the PR head or contains no commits")
-        return commits
 
     def queue(self, branch):
         entries, cursor, total, root = [], None, None, None

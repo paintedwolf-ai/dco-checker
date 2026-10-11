@@ -65,7 +65,7 @@ class TransportTests(unittest.TestCase):
         opener = Mock()
         opener.open.return_value = Response(json.dumps(comparison).encode())
         github = GitHub("org/repo", Transport("secret", opener=opener))
-        commits = github.commits({"baseRefOid": base, "headRefOid": head})
+        commits = list(github.commits({"baseRefOid": base, "headRefOid": head}))
         self.assertEqual(commits[0]["oid"], head)
         self.assertIn("/compare/" + base + "..." + head, opener.open.call_args.args[0].full_url)
 

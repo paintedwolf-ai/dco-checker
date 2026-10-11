@@ -165,3 +165,41 @@ class QueueAuthorityTests(unittest.TestCase):
         rebuilt = replay('rebuilt_queue_capture')
         self.assertEqual([pr['number'] for pr in github.queue_members(QueueInventory(root, rebuilt),
                         rebuilt[-1]['baseCommit']['oid'], rebuilt[-1]['headCommit']['oid'])], [13, 16])
+
+
+class CommitInventoryTests(unittest.TestCase):
+    def node(self, number):
+        return {'sha': f'{number:040x}', 'commit': {'message': 'change',
+                'author': {'name': 'A', 'email': 'a@example.org'},
+                'committer': {'name': 'A', 'email': 'a@example.org'}},
+                'parents': [{'sha': 'b'*40}], 'author': None}
+
+    def response(self, nodes, total=101):
+        return {'base_commit': {'sha': 'b'*40}, 'total_commits': total, 'commits': nodes}
+
+    def test_bodies_are_yielded_before_the_next_page_is_loaded(self):
+        github = GitHub('org/repo', Mock())
+        github.api = Mock(side_effect=[self.response([self.node(n) for n in range(1, 101)]),
+                                      self.response([self.node(101)])])
+        stream = github.commits(pull(1, head=f'{101:040x}'))
+        self.assertEqual(next(stream)['oid'], f'{1:040x}')
+        self.assertEqual(github.api.call_count, 1)
+        self.assertEqual(len(list(stream)), 100)
+        self.assertEqual(github.api.call_count, 2)
+
+    def test_invalid_later_pages_refuse_even_after_a_complete_first_page(self):
+        first = self.response([self.node(n) for n in range(1, 101)])
+        for last in [self.response([self.node(1)]), self.response([self.node(101)], total=102),
+                     self.response([self.node(101), self.node(102)]), self.response(None),
+                     self.response([self.node(102)])]:
+            with self.subTest(last=last):
+                github = GitHub('org/repo', Mock())
+                github.api = Mock(side_effect=[first, last])
+                with self.assertRaises(Refused):
+                    list(github.commits(pull(1, head=f'{101:040x}')))
+
+    def test_oversized_first_page_is_refused(self):
+        github = GitHub('org/repo', Mock())
+        github.api = Mock(return_value=self.response([self.node(n) for n in range(1, 102)]))
+        with self.assertRaises(Refused):
+            list(github.commits(pull(1, head=f'{101:040x}')))
