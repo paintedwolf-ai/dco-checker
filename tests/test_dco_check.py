@@ -1,5 +1,6 @@
 """Independent execution-level certification contracts; no contribution code runs."""
 import copy
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -9,7 +10,7 @@ from unittest.mock import patch
 
 from dco_checker import Refused
 from dco_checker.engine import Config, run
-from dco_checker.evidence import GitHub
+from dco_checker.evidence import GitHub, QueueInventory, queue_chain
 from dco_checker.transport import APIError
 
 
@@ -45,7 +46,9 @@ class Consumer:
     def commits(self, expected):
         return copy.deepcopy(self.inventory[expected['number']])
     def queue(self, branch):
-        return copy.deepcopy(self.entries)
+        return QueueInventory(sha(1000), copy.deepcopy(self.entries))
+    def queue_members(self, inventory, base, head):
+        return queue_chain(inventory, base, head)[1]
     def api(self, path, payload=None, method=None):
         if '/actions/runs/' in path:
             return copy.deepcopy(self.ci)
@@ -82,6 +85,19 @@ class ExecutionContracts(unittest.TestCase):
         config = Config(sha(900), run_id, 1, f'https://github.com/org/repo/actions/runs/{run_id}', sha(901))
         with redirect_stdout(io.StringIO()):
             return run(github, event, payload or {'inputs': {'pull_request': '1'}}, config)
+
+    def test_logged_evidence_independently_recomputes_published_digest(self):
+        github = Consumer()
+        output = io.StringIO()
+        config = Config(sha(900), 10, 1, 'https://github.com/org/repo/actions/runs/10', sha(901))
+        with redirect_stdout(output):
+            self.assertEqual(run(github, 'workflow_dispatch', {'inputs': {'pull_request': '1'}}, config), 0)
+        evidence = json.loads(next(line.removeprefix('DCO evidence: ') for line in output.getvalue().splitlines()
+                                   if line.startswith('DCO evidence: ')))
+        digest = evidence.pop('digest')
+        self.assertEqual(hashlib.sha256(json.dumps(evidence, sort_keys=True, separators=(',', ':')).encode()).hexdigest(), digest)
+        self.assertTrue(github.statuses[-1]['target_url'].endswith(':' + digest))
+        self.assertTrue(github.checks[-1]['external_id'].endswith(':' + digest))
 
     def test_duplicate_delivery_converges_on_identified_check(self):
         github = Consumer()
@@ -150,6 +166,25 @@ class ExecutionContracts(unittest.TestCase):
         self.assertEqual(self.execute(github, 'merge_group', payload, run_id=11), 1)
         self.assertIn('PR #2', github.checks[-1]['output']['summary'])
 
+    def test_queue_event_base_is_checkpoint_not_unsigned_prefix_exemption(self):
+        github = Consumer([pull(), pull(2)])
+        github.entries = [dict(id='one', baseCommit={'oid': sha(1000)}, headCommit={'oid': sha(2001)}, pullRequest=pull()),
+                          dict(id='two', baseCommit={'oid': sha(2001)}, headCommit={'oid': sha(2002)}, pullRequest=pull(2))]
+        github.inventory[1] = [commit(sha(1), signed=False)]
+        payload = {'merge_group': {'base_ref': 'refs/heads/main', 'base_sha': sha(2001), 'head_sha': sha(2002)}}
+        self.assertEqual(self.execute(github, 'merge_group', payload), 1)
+        self.assertEqual(github.statuses[-1]['state'], 'failure')
+        self.assertIn('PR #1', github.checks[-1]['output']['summary'])
+
+    def test_queue_root_change_after_scan_cannot_publish_success(self):
+        github = Consumer()
+        entry = dict(id='one', baseCommit={'oid': sha(1000)}, headCommit={'oid': sha(2001)}, pullRequest=pull())
+        payload = {'merge_group': {'base_ref': 'refs/heads/main', 'base_sha': sha(1000), 'head_sha': sha(2001)}}
+        with patch.object(github, 'queue', side_effect=[QueueInventory(sha(1000), [entry]),
+                QueueInventory(sha(1000), [entry]), QueueInventory(sha(1001), [entry])]):
+            self.assertEqual(self.execute(github, 'merge_group', payload), 1)
+        self.assertNotEqual(github.statuses[-1]['state'], 'success')
+
     def test_fork_and_dependabot_ci_associations_are_authoritative(self):
         for fork in (False, True):
             github = Consumer()
@@ -194,11 +229,27 @@ class ExecutionContracts(unittest.TestCase):
                 with self.assertRaises(Refused):
                     GitHub('org/repo', transport).commits(pull())
 
+    def test_malformed_parent_inventory_cannot_grant_merge_exemption(self):
+        for parents in ([None, None], [{}, {}], [{'sha': 'wrong'}, {'sha': sha(0)}],
+                        [{'sha': sha(0)}, {'sha': sha(0)}], None):
+            with self.subTest(parents=parents):
+                github = Consumer()
+                unsigned = commit(sha(1), signed=False)
+                response = dict(base_commit={'sha': sha(1000)}, total_commits=1, commits=[dict(sha=sha(1),
+                    commit={key: unsigned[key] for key in ('message', 'author', 'committer')},
+                    author=unsigned['githubAuthor'], parents=parents)])
+                transport = type('Recorded', (), {})()
+                transport.request = lambda *args, **kwargs: response
+                github.commits = GitHub('org/repo', transport).commits
+                self.assertEqual(self.execute(github), 1)
+                self.assertEqual(github.statuses[-1]['state'], 'error')
+                self.assertNotEqual(github.checks[-1]['conclusion'], 'success')
+
     def test_queue_membership_disappearing_never_finishes_success(self):
         github = Consumer()
         entry = dict(id='one', baseCommit={'oid': sha(1000)}, headCommit={'oid': sha(2001)}, pullRequest=pull())
         payload = {'merge_group': {'base_ref': 'refs/heads/main', 'base_sha': sha(1000), 'head_sha': sha(2001)}}
-        with patch.object(github, 'queue', side_effect=[[entry], [entry], []]):
+        with patch.object(github, 'queue', side_effect=[QueueInventory(sha(1000), [entry]), QueueInventory(sha(1000), [entry]), QueueInventory(sha(1000), [])]):
             self.assertEqual(self.execute(github, 'merge_group', payload), 1)
         self.assertEqual(github.checks[-1]['conclusion'], 'failure')
 

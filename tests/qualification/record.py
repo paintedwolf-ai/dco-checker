@@ -6,6 +6,7 @@ Uses the operator's gh login, never the action's runtime credentials. Read only.
 import argparse
 import base64
 import datetime
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -65,6 +66,92 @@ def verify_gate(statuses, checks, run, expected_state):
         if not any(status.get('target_url') == run['html_url'] + '#' + check['external_id'] for check in audits):
             errors.append('required status and audit do not identify the same immutable evidence')
     return errors
+
+
+def logged_json(logs, marker):
+    records = []
+    for line in logs.splitlines():
+        if marker not in line:
+            continue
+        value = line.split(marker, 1)[1].strip()
+        # The runner also prints the step's source. Only emitted JSON is data.
+        if not value.startswith('{'):
+            continue
+        try:
+            records.append(json.loads(value))
+        except ValueError:
+            continue
+    return records
+
+
+def verify_evidence(logs, checks, run, *, repository, head, action_sha, caller_revision):
+    records = logged_json(logs, 'DCO evidence: ')
+    events = logged_json(logs, 'DCO_QUALIFICATION_EVENT=')
+    queues = logged_json(logs, 'DCO_QUALIFICATION_QUEUE=')
+    errors = []
+    evidence = records[0] if records else None
+    if not isinstance(evidence, dict):
+        errors.append('runner logs lack canonical immutable DCO evidence')
+    else:
+        unsigned = dict(evidence)
+        digest = unsigned.pop('digest', None)
+        calculated = hashlib.sha256(json.dumps(unsigned, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        expected = {'repository': repository, 'sha': head, 'revision': action_sha,
+                    'caller_revision': caller_revision, 'policy': '2'}
+        if digest != calculated or any(evidence.get(k) != v for k, v in expected.items()):
+            errors.append('canonical evidence digest or repository/head/source identity differs')
+        identity = f"dco:v2:{run['id']}:{run.get('run_attempt', 1)}:{calculated}"
+        if not any(c.get('name') == 'DCO audit' and c.get('external_id') == identity for c in checks):
+            errors.append('canonical evidence does not reproduce the published audit identity')
+        if any(record != evidence for record in records):
+            errors.append('runner emitted conflicting immutable evidence records')
+        group = evidence.get('group')
+        if group:
+            if not events or not queues:
+                errors.append('group qualification requires actual event and complete queue captures')
+                return errors, {'canonical_evidence': evidence, 'captured_events': events, 'captured_queues': queues}
+            try:
+                captured = events[-1]['merge_group']
+                if (captured['head_sha'] != group['head'] or captured['base_sha'] != group['event_base']
+                        or captured['base_ref'] != 'refs/heads/' + group['branch'] or group['head'] != head):
+                    errors.append('canonical group differs from the actual captured event')
+                captured_repository = queues[-1]['data']['repository']
+                if captured_repository['baseRef']['target']['oid'] != group['root']:
+                    errors.append('canonical protected root differs from captured queue authority')
+                connection = captured_repository['mergeQueue']['entries']
+                if (connection['pageInfo']['hasNextPage'] is not False or
+                        connection['totalCount'] != len(connection['nodes'])):
+                    errors.append('captured qualification queue inventory is incomplete')
+                by_head = {}
+                for entry in connection['nodes']:
+                    if entry['headCommit'] is None:
+                        continue
+                    oid = entry['headCommit']['oid']
+                    if oid in by_head:
+                        raise ValueError('duplicate queue head')
+                    by_head[oid] = entry
+                members, visited, cursor = [], set(), group['head']
+                while cursor != group['root']:
+                    if cursor in visited or cursor not in by_head:
+                        raise ValueError('missing or cyclic cumulative prefix')
+                    visited.add(cursor)
+                    entry = by_head[cursor]
+                    snapshot = {key:entry['pullRequest'][key] for key in
+                                ('number','headRefOid','baseRefOid','isDraft','state')}
+                    if snapshot['state'] != 'OPEN' or snapshot['isDraft'] is not False:
+                        raise ValueError('inactive original member')
+                    members.append(snapshot)
+                    cursor = entry['baseCommit']['oid']
+                if group['event_base'] not in visited | {group['root']}:
+                    raise ValueError('event checkpoint absent from captured ancestry')
+                # Certification canonicalizes member order by PR number, while
+                # the independently captured queue records ancestry order.
+                canonical_members = evidence.get('members')
+                if not isinstance(canonical_members, list) or sorted(members, key=lambda m:m['number']) != canonical_members:
+                    errors.append('canonical original members differ from complete captured cumulative prefix')
+            except (KeyError, TypeError, ValueError):
+                errors.append('captured qualification queue authority is malformed')
+    return errors, {'canonical_evidence': evidence, 'captured_events': events, 'captured_queues': queues}
 
 
 def main():
@@ -152,6 +239,9 @@ def main():
                 errors.append("published check lacks valid structured execution provenance")
     if f"paintedwolf-ai/dco-checker@{args.action_sha}" not in source:
         errors.append("immutable caller workflow does not pin the requested action revision")
+    evidence_errors, retained_evidence = verify_evidence(logs, checks, run, repository=args.repository,
+        head=args.head, action_sha=args.action_sha, caller_revision=caller_revision)
+    errors += evidence_errors
     document = {"schema_version": 1, "qualification_kind": "hosted-token-bearing",
                 "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "scenario": args.scenario, "action_sha": args.action_sha,
@@ -159,6 +249,7 @@ def main():
                 "release_eligible": not args.allow_legacy_missing_run_link and not errors,
                 "legacy_missing_run_link_allowed": args.allow_legacy_missing_run_link,
                 "expected_state": expected_state, "statuses": statuses,
+                **retained_evidence,
                 "runner_logs": logs, "run": run, "jobs": jobs, "checks": checks, "caller_workflow": {"ref": caller_revision, "blob_sha": workflow["sha"], "source": source}, "errors": errors,
                 "limitations": ["this record does not demonstrate required-context ruleset enforcement",
                                 "historical execution evidence is not a claim about the latest merge decision"]}

@@ -43,3 +43,14 @@ class PolicyTests(unittest.TestCase):
         second = make_evidence("org/repo", "a" * 40, [], None, "b" * 40, "d" * 40)
         self.assertNotEqual(first["digest"], second["digest"])
         self.assertEqual(first["caller_revision"], "c" * 40)
+
+    def test_queue_evidence_binds_root_and_event_checkpoint(self):
+        group = dict(branch='main', root='d'*40, event_base='e'*40, head='a'*40)
+        original = make_evidence('org/repo', 'a'*40, [], group, 'b'*40, 'c'*40)
+        for field, replacement in [('root', 'f'*40), ('event_base', 'd'*40)]:
+            changed = make_evidence('org/repo', 'a'*40, [], {**group, field: replacement}, 'b'*40, 'c'*40)
+            self.assertNotEqual(original['digest'], changed['digest'])
+        output = render('org/repo', original, [])
+        self.assertIn('Protected root: `' + group['root'] + '`', output)
+        self.assertIn('event base checkpoint: `' + group['event_base'] + '`', output)
+        self.assertIn('Queue branch: main', output)
