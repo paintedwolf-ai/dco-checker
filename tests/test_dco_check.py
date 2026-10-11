@@ -198,21 +198,53 @@ class ExecutionContracts(unittest.TestCase):
             self.assertEqual(self.execute(github, 'workflow_run', {'workflow_run': copy.deepcopy(github.ci)}, run_id=11), 0)
             self.assertEqual(github.writes, before)
 
-    def test_unsigned_after_250_fails_entire_certification(self):
-        github = Consumer([pull(head=sha(251))])
-        nodes = []
-        for number in range(1, 252):
-            c = commit(sha(number), signed=number != 251)
-            nodes.append({'sha': c['oid'], 'commit': {key: c[key] for key in ('message','author','committer')},
-                          'author': c['githubAuthor'], 'parents': [{'sha': sha(number-1)}]})
+    def test_large_prs_evaluate_every_commit_before_terminal_publication(self):
+        for count, unsigned in [(251, {251}), (1000, set()), (10001, {251, 5000, 10001}),
+                                (10001, set()), (1000, set(range(1, 1001)))]:
+            with self.subTest(count=count, unsigned_count=len(unsigned)):
+                github = Consumer([pull(head=sha(count), base=sha(20000))])
+                pages = []
+                def request(path, payload=None, method=None):
+                    page = int(path.rsplit('page=', 1)[-1])
+                    pages.append(page)
+                    # No terminal success is allowed before the complete scan.
+                    self.assertFalse(any(s['state'] == 'success' for s in github.statuses))
+                    nodes = []
+                    for number in range((page-1)*100+1, min(page*100, count)+1):
+                        c = commit(sha(number), signed=number not in unsigned)
+                        nodes.append({'sha': c['oid'], 'commit': {key: c[key] for key in ('message','author','committer')},
+                                      'author': c['githubAuthor'], 'parents': [{'sha': sha(number-1)}]})
+                    return {'base_commit': {'sha': sha(20000)}, 'total_commits': count, 'commits': nodes}
+                transport = type('Recorded', (), {})()
+                transport.request = request
+                github.commits = GitHub('org/repo', transport).commits
+                self.assertEqual(self.execute(github), int(bool(unsigned)))
+                self.assertEqual(pages, list(range(1, (count+99)//100+1)))
+                summary = github.checks[-1]['output']['summary']
+                self.assertIn(f'{count-len(unsigned)} signed, 0 exempt, {len(unsigned)} failed', summary)
+                if len(unsigned) <= 100:
+                    for number in unsigned:
+                        self.assertIn(sha(number)[:12], summary)
+                else:
+                    self.assertIn('900 additional failing', summary)
+                self.assertLess(len(summary.encode()), 65535)
+
+    def test_late_truncation_never_certifies_a_signed_prefix(self):
+        github = Consumer([pull(head=sha(10001), base=sha(20000))])
+        def request(path, payload=None, method=None):
+            page = int(path.rsplit('page=', 1)[-1])
+            nodes = []
+            for number in range((page-1)*100+1, min(page*100, 10000)+1):
+                c = commit(sha(number))
+                nodes.append({'sha': c['oid'], 'commit': {key: c[key] for key in ('message','author','committer')},
+                              'author': c['githubAuthor'], 'parents': [{'sha': sha(number-1)}]})
+            return {'base_commit': {'sha': sha(20000)}, 'total_commits': 10001, 'commits': nodes}
         transport = type('Recorded', (), {})()
-        transport.request = lambda path, payload=None, method=None: {'base_commit': {'sha': sha(1000)}, 'total_commits': 251,
-            'commits': nodes[(int(path.rsplit('page=', 1)[-1])-1)*100:int(path.rsplit('page=',1)[-1])*100]}
-        inventory = GitHub('org/repo', transport)
-        github.commits = inventory.commits
+        transport.request = request
+        github.commits = GitHub('org/repo', transport).commits
         self.assertEqual(self.execute(github), 1)
-        self.assertIn(sha(251)[:12], github.checks[-1]['output']['summary'])
-        self.assertIn('250 signed, 0 exempt, 1 failed', github.checks[-1]['output']['summary'])
+        self.assertEqual(github.statuses[-1]['state'], 'error')
+        self.assertFalse(any(s['state'] == 'success' for s in github.statuses))
 
     def test_partial_duplicate_and_missing_head_inventories_cannot_pass(self):
         first = commit(sha(1))
@@ -227,7 +259,7 @@ class ExecutionContracts(unittest.TestCase):
                 transport = type('Recorded', (), {})()
                 transport.request = lambda *a, **kw: response
                 with self.assertRaises(Refused):
-                    GitHub('org/repo', transport).commits(pull())
+                    list(GitHub('org/repo', transport).commits(pull()))
 
     def test_malformed_parent_inventory_cannot_grant_merge_exemption(self):
         for parents in ([None, None], [{}, {}], [{'sha': 'wrong'}, {'sha': sha(0)}],

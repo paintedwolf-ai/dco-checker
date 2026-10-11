@@ -174,7 +174,7 @@ def run(github, event_name, event, config):
             transport.deadline = deadline - 60
         try:
             for member in members:
-                results += [evaluate(commit, member["number"]) for commit in github.commits(member)]
+                results.extend(evaluate(commit, member["number"]) for commit in github.commits(member))
             revalidate(github, sha, members, group)
         finally:
             if deadline is not None:
