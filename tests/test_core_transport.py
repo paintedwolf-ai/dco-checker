@@ -59,7 +59,7 @@ class TransportTests(unittest.TestCase):
         from dco_checker.evidence import GitHub
         base, head = "a" * 40, "b" * 40
         comparison = {"base_commit": {"sha": base}, "total_commits": 1, "commits": [{
-            "sha": head, "commit": {"message": "subject\n\nSigned-off-by: A <a@example.org>",
+            "sha": head, "commit": {"message": "subject\n\nSigned-off-by: A <a@example.org>", "tree": {"sha": "f" * 40},
             "author": {"name": "A", "email": "a@example.org"}, "committer": {"name": "A", "email": "a@example.org"}},
             "author": {"type": "User"}, "parents": [{"sha": base}]}]}
         opener = Mock()

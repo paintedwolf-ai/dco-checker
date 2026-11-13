@@ -1,4 +1,4 @@
-# Certification policy v2
+# Certification policy v3
 
 Certification applies to every commit reachable from the captured PR head that is
 not reachable from its captured base. Every original PR in a merge group must pass.
@@ -31,12 +31,16 @@ final-trailer semantics; old messages containing only examples may now fail.
 
 ## Exemptions
 
-Commits with more than one parent are exempt as merge commits. This includes
-merges containing manual conflict resolutions; this policy does not separately
-certify those resolutions. A GitHub-associated author of type `Bot` is exempt;
-login or email resemblance to a bot is insufficient. Bot association does not
-prove that automation created every change. These exemptions preserve the
-established policy and appear with explicit reasons in audit summaries.
+A merge commit is exempt only when it is a two-parent merge whose tree equals
+Git's conflict-free merge of its parents (`git merge-tree --write-tree`); such a
+merge adds nothing anyone wrote. A merge that resolves conflicts, adds or changes
+anything beyond the automatic result, or has more than two parents is certified
+like any other commit and needs its own sign-off. Version 3 replaces version 2's
+exemption of every multi-parent commit, which let a conflict resolution land
+uncertified. A GitHub-associated author of type `Bot` is exempt; login or email
+resemblance to a bot is insufficient. Bot association does not prove that
+automation created every change. These exemptions appear with explicit reasons in
+audit summaries.
 
 No repository owner, member, collaborator, or remediation exemption exists.
 Cryptographic commit signing is separate from DCO certification and is not required.

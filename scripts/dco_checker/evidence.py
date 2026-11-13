@@ -124,13 +124,15 @@ class GitHub:
                 seen.add(node["sha"])
                 raw = node["commit"]
                 parents = node["parents"]
+                tree = (raw.get("tree") or {}).get("sha")
                 if (not isinstance(raw["message"], str) or not isinstance(parents, list) or
                     any(not isinstance(parent, dict) or not isinstance(parent.get("sha"), str) or
                         not SHA.fullmatch(parent["sha"]) for parent in parents) or
-                    len({parent["sha"] for parent in parents}) != len(parents)):
+                    len({parent["sha"] for parent in parents}) != len(parents) or
+                    not isinstance(tree, str) or not SHA.fullmatch(tree)):
                     raise Refused("Malformed commit evidence")
-                yield {"oid": node["sha"], "message": raw["message"], "author": raw["author"],
-                    "committer": raw["committer"], "parents": {"totalCount": len(node["parents"])}, "githubAuthor": node.get("author")}
+                yield {"oid": node["sha"], "message": raw["message"], "author": raw["author"], "committer": raw["committer"],
+                    "parents": [parent["sha"] for parent in parents], "tree": tree, "githubAuthor": node.get("author")}
             if len(seen) == total:
                 break
             if len(nodes) != 100:
