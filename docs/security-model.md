@@ -32,6 +32,14 @@ membership are revalidated before success. A withdrawn prefix, rewritten edge,
 or changed root refuses certification. Missing or ambiguous evidence cannot
 certify a group.
 
+To tell a clean merge from one with authored resolutions, the checker fetches the
+merge commit into a temporary bare, blob-less partial clone and runs
+`git merge-tree --write-tree` on its parents. It runs with system and global Git
+configuration disabled, so no repository-supplied merge driver, hook or filter can
+execute; nothing from the PR is checked out or run. The token reaches Git only as
+an HTTP header in its environment, never in arguments, and the parents and tree Git
+reads must match the API evidence or certification is refused.
+
 Use the supplied serial caller and maintain the DCO workflow on the default and
 queue base branch. Manual dispatch should target the default branch. Review all
 changes to `.github/workflows/**`, action references, check-writing permissions,

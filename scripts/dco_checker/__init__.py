@@ -1,5 +1,5 @@
 """Original-commit certification for trusted GitHub Actions callers."""
-POLICY_VERSION = "2"
+POLICY_VERSION = "3"
 GATE_CONTEXT = "DCO-owned"
 AUDIT_NAME = "DCO audit"
 

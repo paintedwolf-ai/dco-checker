@@ -6,6 +6,7 @@ import re
 from . import Draft, Obsolete, POLICY_VERSION, Refused
 from .publication import Publication
 from .evidence import SHA
+from .merges import Merges
 from .policy import evaluate, render
 
 
@@ -148,8 +149,9 @@ def make_evidence(repository, sha, members, group, revision, caller_revision):
     return evidence
 
 
-def run(github, event_name, event, config):
+def run(github, event_name, event, config, merges=None):
     publisher, results, evidence = None, [], None
+    merges = merges or Merges(github.repository, getattr(getattr(github, "transport", None), "token", None))
     try:
         if config.run_url != f"https://github.com/{github.repository}/actions/runs/{config.run_id}":
             raise Refused("Run URL must match the publishing repository and run ID")
@@ -174,7 +176,7 @@ def run(github, event_name, event, config):
             transport.deadline = deadline - 60
         try:
             for member in members:
-                results.extend(evaluate(commit, member["number"]) for commit in github.commits(member))
+                results.extend(evaluate(commit, member["number"], merges) for commit in github.commits(member))
             revalidate(github, sha, members, group)
         finally:
             if deadline is not None:

@@ -33,18 +33,20 @@ def trailers(message):
     return result
 
 
-def evaluate(commit, pr):
+def evaluate(commit, pr, merges):
     oid = commit["oid"]
-    if commit["parents"]["totalCount"] > 1:
-        return Evaluation(pr, oid, "exempt", "merge commit (multiple parents)")
     if (commit.get("githubAuthor") or {}).get("type") == "Bot":
         return Evaluation(pr, oid, "exempt", "GitHub-associated Bot author")
+    merge = len(commit["parents"]) > 1
+    if merge and merges.clean(oid, commit["parents"], commit["tree"]):
+        return Evaluation(pr, oid, "exempt", "clean merge identical to the automatic merge of its parents")
     pairs = {(identity.get("name", "").strip().casefold(), identity.get("email", "").casefold())
              for identity in (commit["author"], commit["committer"])
              if identity.get("name") and identity.get("email")}
     values = [value for key, value in trailers(commit["message"]) if key == "signed-off-by"]
     if not values:
-        return Evaluation(pr, oid, "failed", "missing Signed-off-by in final trailer block")
+        return Evaluation(pr, oid, "failed", "merge with a resolution or added changes is missing Signed-off-by" if merge
+                          else "missing Signed-off-by in final trailer block")
     parsed = [SIGNOFF.fullmatch(value) for value in values]
     valid = [match for match in parsed if match and EMAIL.fullmatch(match[2])]
     if any((match[1].strip().casefold(), match[2].casefold()) in pairs for match in valid):

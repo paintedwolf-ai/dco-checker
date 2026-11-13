@@ -25,7 +25,7 @@ def pull(number=1, head=None, base=None, draft=False):
 def commit(oid, signed=True):
     identity = dict(name='Author', email='author@example.org')
     return dict(oid=oid, message='Change\n\nSigned-off-by: Author <author@example.org>' if signed else 'Change',
-                author=identity, committer=identity, parents=dict(totalCount=1), githubAuthor=dict(type='User'))
+                author=identity, committer=identity, parents=['0' * 40], tree='f' * 40, githubAuthor=dict(type='User'))
 
 
 class Consumer:
@@ -212,7 +212,7 @@ class ExecutionContracts(unittest.TestCase):
                     nodes = []
                     for number in range((page-1)*100+1, min(page*100, count)+1):
                         c = commit(sha(number), signed=number not in unsigned)
-                        nodes.append({'sha': c['oid'], 'commit': {key: c[key] for key in ('message','author','committer')},
+                        nodes.append({'sha': c['oid'], 'commit': {**{key: c[key] for key in ('message','author','committer')}, 'tree': {'sha': c['tree']}},
                                       'author': c['githubAuthor'], 'parents': [{'sha': sha(number-1)}]})
                     return {'base_commit': {'sha': sha(20000)}, 'total_commits': count, 'commits': nodes}
                 transport = type('Recorded', (), {})()
@@ -236,7 +236,7 @@ class ExecutionContracts(unittest.TestCase):
             nodes = []
             for number in range((page-1)*100+1, min(page*100, 10000)+1):
                 c = commit(sha(number))
-                nodes.append({'sha': c['oid'], 'commit': {key: c[key] for key in ('message','author','committer')},
+                nodes.append({'sha': c['oid'], 'commit': {**{key: c[key] for key in ('message','author','committer')}, 'tree': {'sha': c['tree']}},
                               'author': c['githubAuthor'], 'parents': [{'sha': sha(number-1)}]})
             return {'base_commit': {'sha': sha(20000)}, 'total_commits': 10001, 'commits': nodes}
         transport = type('Recorded', (), {})()
@@ -248,7 +248,7 @@ class ExecutionContracts(unittest.TestCase):
 
     def test_partial_duplicate_and_missing_head_inventories_cannot_pass(self):
         first = commit(sha(1))
-        raw = {'sha': first['oid'], 'commit': {key: first[key] for key in ('message','author','committer')},
+        raw = {'sha': first['oid'], 'commit': {**{key: first[key] for key in ('message','author','committer')}, 'tree': {'sha': first['tree']}},
                'author': first['githubAuthor'], 'parents': [{'sha': sha(0)}]}
         cases = [dict(base_commit={'sha': sha(1000)}, total_commits=2, commits=[raw]),
                  dict(base_commit={'sha': sha(1000)}, total_commits=2, commits=[raw, raw]),

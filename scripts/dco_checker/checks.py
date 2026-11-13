@@ -80,7 +80,7 @@ class Audit:
             return
         payload = {"name": AUDIT_NAME, "head_sha": self.sha, "external_id": self.external_id,
                    "status": "in_progress", "details_url": self.config.run_url,
-                   "output": self.output("DCO certification in progress", "Evaluating original commits against policy 2 and captured live PR contexts.")}
+                   "output": self.output("DCO certification in progress", f"Evaluating original commits against policy {POLICY_VERSION} and captured live PR contexts.")}
         try:
             self.check = self.github.api(f"repos/{self.github.repository}/check-runs", payload, "POST")
             if not isinstance(self.check, dict) or type(self.check.get("id")) is not int:

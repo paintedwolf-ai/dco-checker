@@ -7,26 +7,43 @@ def commit(message, *, author=None, committer=None, parents=1, bot=False):
     return {"oid": "a" * 40, "message": message,
         "author": author or {"name": "Alice", "email": "alice@example.org"},
         "committer": committer or {"name": "Bob", "email": "bob@example.org"},
-        "parents": {"totalCount": parents}, "githubAuthor": {"type": "Bot" if bot else "User"}}
+        "parents": [str(n) * 40 for n in range(parents)], "tree": "f" * 40, "githubAuthor": {"type": "Bot" if bot else "User"}}
+
+
+class Merges:
+    def __init__(self, clean):
+        self.clean_merge, self.calls = clean, []
+
+    def clean(self, oid, parents, tree):
+        self.calls.append((oid, parents, tree))
+        return self.clean_merge
+
+
+CLEAN, RESOLVED = Merges(True), Merges(False)
 
 
 class PolicyTests(unittest.TestCase):
     def test_final_trailers_and_identity_pairs(self):
         for message in ["subject\n\nSigned-off-by: Alice <alice@example.org>", "subject\n\nSIGNED-OFF-BY: ALICE <ALICE@example.org>\nCo-authored-by: C <c@example.org>", "Signed-off-by: Bob <bob@example.org>"]:
-            self.assertEqual(evaluate(commit(message), 1).outcome, "signed")
+            self.assertEqual(evaluate(commit(message), 1, RESOLVED).outcome, "signed")
         for message in ["subject\n\n```\nSigned-off-by: Alice <alice@example.org>\n```", "Signed-off-by: Alice <alice@example.org>\n\nbody", "subject\nSigned-off-by: Alice <alice@example.org>", "subject\n\nSigned-off-by: Alice <bob@example.org>", "subject\n\nSigned-off-by: Alice <alice@example>"]:
-            self.assertEqual(evaluate(commit(message), 1).outcome, "failed")
+            self.assertEqual(evaluate(commit(message), 1, RESOLVED).outcome, "failed")
 
     def test_exemption_is_explicit_and_account_associated(self):
-        self.assertEqual(evaluate(commit("no trailer", parents=2), 1).reason, "merge commit (multiple parents)")
-        self.assertEqual(evaluate(commit("no trailer", bot=True), 1).reason, "GitHub-associated Bot author")
+        self.assertEqual(evaluate(commit("no trailer", parents=2), 1, CLEAN).reason, "clean merge identical to the automatic merge of its parents")
+        self.assertEqual(evaluate(commit("no trailer", parents=2), 1, RESOLVED).reason, "merge with a resolution or added changes is missing Signed-off-by")
+        self.assertEqual(evaluate(commit("subject\n\nSigned-off-by: Alice <alice@example.org>", parents=2), 1, RESOLVED).outcome, "signed")
+        single = Merges(True)
+        self.assertEqual(evaluate(commit("no trailer"), 1, single).outcome, "failed")
+        self.assertEqual(single.calls, [])
+        self.assertEqual(evaluate(commit("no trailer", bot=True), 1, RESOLVED).reason, "GitHub-associated Bot author")
         value = commit("no trailer", author={"name": "bot[bot]", "email": "bot@users.noreply.github.com"})
         value["githubAuthor"] = None
-        self.assertEqual(evaluate(value, 1).outcome, "failed")
+        self.assertEqual(evaluate(value, 1, RESOLVED).outcome, "failed")
 
     def test_output_bounds_failures_and_escapes_errors(self):
         evidence = make_evidence("org/repo", "a" * 40, [], None, "b" * 40, "c" * 40)
-        results = [evaluate(commit("no trailer"), 1) for _ in range(130)]
+        results = [evaluate(commit("no trailer"), 1, RESOLVED) for _ in range(130)]
         output = render("org/repo", evidence, results, error="<script>bad</script>")
         self.assertIn("30 additional", output)
         self.assertNotIn("<script>", output)

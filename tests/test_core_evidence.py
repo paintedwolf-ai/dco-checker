@@ -169,7 +169,7 @@ class QueueAuthorityTests(unittest.TestCase):
 
 class CommitInventoryTests(unittest.TestCase):
     def node(self, number):
-        return {'sha': f'{number:040x}', 'commit': {'message': 'change',
+        return {'sha': f'{number:040x}', 'commit': {'message': 'change', 'tree': {'sha': 'f' * 40},
                 'author': {'name': 'A', 'email': 'a@example.org'},
                 'committer': {'name': 'A', 'email': 'a@example.org'}},
                 'parents': [{'sha': 'b'*40}], 'author': None}
