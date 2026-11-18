@@ -72,6 +72,9 @@ def validate(workflow):
             concurrency(job['concurrency'])
 
 
+SUBJECT_GROUP = 'dco-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.merge_group.head_ref || inputs.pull_request || github.event.workflow_run.head_branch || github.run_id }}'
+
+
 class WorkflowContracts(unittest.TestCase):
     def test_all_workflow_concurrency_sections_are_valid(self):
         files = sorted((ROOT / '.github/workflows').glob('*.yml'))
@@ -80,13 +83,13 @@ class WorkflowContracts(unittest.TestCase):
             with self.subTest(path=path):
                 validate(load(path.read_text()))
 
-    def test_every_dco_caller_has_same_serial_fifo_contract(self):
+    def test_every_dco_caller_serializes_per_subject_without_cancelling(self):
         for path in [ROOT / '.github/workflows/dco.yml', ROOT / 'examples/dco.yml',
                      ROOT / 'tests/qualification/consumer.template.yml']:
             with self.subTest(path=path):
                 workflow = load(path.read_text())
                 self.assertEqual(workflow['concurrency'],
-                                 {'group': 'dco-certification', 'queue': 'max', 'cancel-in-progress': False})
+                                 {'group': SUBJECT_GROUP, 'queue': 'max', 'cancel-in-progress': False})
                 self.assertEqual(set(workflow['on']), {'pull_request_target','workflow_run','merge_group','workflow_dispatch'})
                 self.assertEqual(workflow['permissions'],
                                  {'contents': 'read','pull-requests': 'read','actions': 'read','checks': 'write','statuses': 'write'})
