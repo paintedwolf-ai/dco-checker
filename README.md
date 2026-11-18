@@ -63,9 +63,9 @@ A current ready target receives a pending status before scanning and a pending
 audit check identified by execution and immutable evidence. A terminal status is
 published only after the identified audit check is complete. Interrupted scans remain pending until another run rechecks them. Publication reconciles ambiguous writes and refuses to replace newer executions.
 Certification reserves capacity for pending, terminal, and ambiguous-write recovery
-within GitHub's per-context status limit before it begins publication. Repository-wide serial caller execution with `queue: max` prevents delayed CI
-completions from cancelling current work. GitHub bounds the queued backlog to 100
-runs; operators must recheck dropped work after an exceptional event burst.
+within GitHub's per-context status limit before it begins publication. Callers serialize per pull request or merge group with `queue: max`, so a delayed
+CI completion never cancels current work on the same subject, and a burst across
+many pull requests cannot fill one shared queue.
 Obsolete validated events do no work.
 Changed or unavailable evidence cannot produce success. Draft observations prevent
 further check writes, including drafts among shared-head PR contexts. GitHub state
