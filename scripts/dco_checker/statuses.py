@@ -1,19 +1,25 @@
 """Suite-independent required gate with execution identity and bounded capacity."""
 import re
+import time
 from . import GATE_CONTEXT, Obsolete, Refused
 from .transport import APIError
 
 IDENTITY = re.compile(r"^dco:v2:(\d+):(\d+):([0-9a-f]{64})$")
 STATES = {"pending", "success", "failure", "error"}
+# The status listing can omit a status posted seconds earlier.
+SETTLE_DELAYS = (1, 2, 4, 8)
 
 
 class Gate:
-    def __init__(self, github, sha, evidence, config):
+    def __init__(self, github, sha, evidence, config, sleep=None):
         self.github, self.sha, self.evidence, self.config = github, sha, evidence, config
         self.identity = f"dco:v2:{config.run_id}:{config.attempt}:{evidence['digest']}"
         self.target_url = config.run_url + "#" + self.identity
+        self.sleep = sleep or getattr(getattr(github, "transport", None), "sleep", time.sleep)
         self.latest = None
+        self.listed = []
         self.count = 0
+        self.own = None
 
     def validate(self, status, *, own=False):
         creator = status.get("creator") or {}
@@ -56,8 +62,22 @@ class Gate:
             page += 1
         # GitHub documents reverse chronological ordering; retain that authority.
         self.latest = statuses[0] if statuses else None
+        self.listed = statuses
         self.count = len(statuses)
         return self.latest
+
+    def settle(self, visible):
+        """Inspect until visible() holds or the bounded delays are spent."""
+        latest = self.inspect()
+        for delay in SETTLE_DELAYS:
+            if visible():
+                break
+            self.sleep(delay)
+            latest = self.inspect()
+        return latest
+
+    def owns(self, state):
+        return self.latest is not None and self.latest.get("target_url") == self.target_url and self.latest["state"] == state
 
     def post(self, state, description):
         # No status mutation is replayed on an unknown response: append-only API
@@ -78,8 +98,8 @@ class Gate:
         except APIError as error:
             if not error.ambiguous:
                 raise
-            recovered = self.inspect()
-            if recovered is None or recovered.get("target_url") != self.target_url or recovered.get("state") != state:
+            self.settle(lambda: self.owns(state))
+            if not self.owns(state):
                 raise Refused("DCO status publication outcome is unknown; dispatch a new certification run") from error
         return self.latest
 
@@ -91,12 +111,16 @@ class Gate:
             if self.count < 1000 and (latest is None or latest["state"] == "success"):
                 self.post("pending", "DCO status capacity reached; push a fresh signed head commit")
             raise Refused("DCO status capacity reached; push a fresh signed head commit before certification")
-        if latest is not None and latest.get("target_url") == self.target_url and latest["state"] == "pending":
-            return latest
-        return self.post("pending", "Original commit DCO certification in progress")
+        if self.owns("pending"):
+            self.own = latest
+        else:
+            self.own = self.post("pending", "Original commit DCO certification in progress")
+        return self.own
 
     def finish(self, state, description):
-        latest = self.inspect()
+        if self.own is None:
+            raise Refused("Pending DCO gate identity was lost")
+        latest = self.settle(lambda: any(status["id"] == self.own["id"] for status in self.listed))
         if latest is None or latest.get("target_url") != self.target_url:
             raise Refused("Pending DCO gate identity was lost")
         if latest["state"] == state:

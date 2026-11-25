@@ -14,14 +14,26 @@ class API:
         self.statuses, self.writes = [], []
         self.lose_response = False
         self.apply = True
+        # Statuses posted while lagging stay out of listings until a sleep.
+        self.lagging = False
+        self.unlisted = set()
+        self.settles = True
+        self.sleeps = []
+    def sleep(self, delay):
+        self.sleeps.append(delay)
+        if self.settles:
+            self.unlisted.clear()
     def api(self, path, payload=None, method=None):
         if payload is None:
             page = int(path.rsplit('page=', 1)[-1])
-            return copy.deepcopy(list(reversed(self.statuses))[(page-1)*100:page*100])
+            listed = [s for s in self.statuses if s['id'] not in self.unlisted]
+            return copy.deepcopy(list(reversed(listed))[(page-1)*100:page*100])
         self.writes.append(copy.deepcopy(payload))
         status = dict(payload, id=len(self.statuses)+1, creator=CREATOR)
         if self.apply:
             self.statuses.append(status)
+            if self.lagging:
+                self.unlisted.add(status['id'])
         if self.lose_response:
             self.lose_response = False
             raise APIError('lost mutation response', ambiguous=True)
@@ -31,7 +43,7 @@ class API:
 def gate(api, run_id=10):
     evidence = make_evidence('org/repo', 'a'*40, [], None, 'b'*40, 'c'*40)
     config = Config('b'*40, run_id, 1, f'https://github.com/org/repo/actions/runs/{run_id}', 'c'*40)
-    return Gate(api, 'a'*40, evidence, config)
+    return Gate(api, 'a'*40, evidence, config, sleep=api.sleep)
 
 
 def historical(api, count, state='success'):
@@ -62,6 +74,34 @@ class GateTests(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'unknown'):
             gate(api).start()
         self.assertEqual(len(api.writes), 1)
+        self.assertEqual(api.sleeps, [1, 2, 4, 8])
+
+    def test_finish_waits_for_its_unlisted_pending_status(self):
+        api = API(); api.lagging = True
+        selected = gate(api); selected.start()
+        selected.finish('success', 'certified')
+        self.assertEqual(api.sleeps, [1])
+        self.assertEqual([s['state'] for s in api.statuses], ['pending', 'success'])
+
+    def test_finish_refuses_when_its_pending_status_never_lists(self):
+        api = API(); api.lagging = True; api.settles = False
+        selected = gate(api); selected.start()
+        with self.assertRaisesRegex(Refused, 'identity was lost'):
+            selected.finish('success', 'certified')
+        self.assertEqual(api.sleeps, [1, 2, 4, 8])
+        self.assertEqual(len(api.writes), 1)
+
+    def test_ambiguous_append_recovers_once_it_lists(self):
+        api = API(); api.lagging = True; api.lose_response = True
+        selected = gate(api); selected.start()
+        self.assertEqual(len(api.writes), 1)
+        self.assertEqual(api.sleeps, [1])
+        self.assertEqual(selected.own['id'], api.statuses[0]['id'])
+
+    def test_listed_status_needs_no_wait(self):
+        api = API(); selected = gate(api)
+        selected.start(); selected.finish('failure', 'missing sign-off')
+        self.assertEqual(api.sleeps, [])
 
     def test_newer_status_execution_prevents_obsolete_writes(self):
         api = API(); gate(api, 11).start()

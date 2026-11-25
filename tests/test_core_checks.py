@@ -11,6 +11,7 @@ class API:
     def __init__(self):
         self.checks, self.posts = [], 0
         self.post_error, self.patch_error = False, False
+        self.unlisted = set()
     def api(self, path, payload=None, method=None):
         if method == "POST":
             self.posts += 1
@@ -28,7 +29,8 @@ class API:
                 raise APIError("lost response", ambiguous=True)
             return check
         if "check-runs?" in path:
-            return {"total_count": len(self.checks), "check_runs": copy.deepcopy(self.checks)}
+            checks = [check for check in self.checks if check["id"] not in self.unlisted]
+            return {"total_count": len(checks), "check_runs": copy.deepcopy(checks)}
         return copy.deepcopy(self.checks[int(path.split('/')[-1]) - 1])
 
 
@@ -65,6 +67,37 @@ class ChecksTests(unittest.TestCase):
             old.finish("success", "obsolete result")
         self.assertEqual(api.checks[0]["status"], "in_progress")
         self.assertEqual(api.checks[1]["conclusion"], "failure")
+
+    def test_unlisted_own_check_finishes_through_its_identity(self):
+        api = API(); check = publisher(api); check.start()
+        api.unlisted.add(1)
+        check.finish("success", "certified")
+        self.assertEqual(api.checks[0]["conclusion"], "success")
+
+    def test_unlisted_own_check_recovers_an_ambiguous_completion(self):
+        api = API(); check = publisher(api); check.start()
+        api.unlisted.add(1)
+        api.patch_error = True
+        check.finish("failure", "missing sign-off")
+        self.assertEqual(api.checks[0]["conclusion"], "failure")
+
+    def test_unlisted_own_check_still_yields_to_a_newer_execution(self):
+        api = API()
+        old, new = publisher(api, 10), publisher(api, 11)
+        old.start(); new.start()
+        api.unlisted.add(1)
+        with self.assertRaises(Obsolete):
+            old.finish("success", "obsolete result")
+        self.assertEqual(api.checks[0]["status"], "in_progress")
+
+    def test_unlisted_own_check_with_foreign_identity_is_refused(self):
+        for field, value in [("app", {"id": 1}), ("head_sha", "c" * 40), ("external_id", "dco:v2:10:1:" + "e" * 64)]:
+            api = API(); check = publisher(api); check.start()
+            api.unlisted.add(1)
+            api.checks[0][field] = value
+            with self.assertRaises(Refused):
+                check.finish("success", "bad publisher")
+            self.assertEqual(api.checks[0]["status"], "in_progress")
 
     def test_duplicate_execution_identity_is_refused(self):
         api = API()
