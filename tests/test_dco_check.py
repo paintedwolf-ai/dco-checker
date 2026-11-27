@@ -39,6 +39,16 @@ class Consumer:
         self.entries = []
         self.ambiguous = False
         self.ci = None
+        # Listings omit records created since the last sleep, as GitHub's do.
+        self.lagging = False
+        self.unlisted = set()
+        self.transport = type('Clock', (), {'sleep': lambda _, delay: self.unlisted.clear()})()
+    def created(self, kind, record):
+        if self.lagging:
+            self.unlisted.add((kind, record['id']))
+        return record
+    def listed(self, kind, records):
+        return [record for record in records if (kind, record['id']) not in self.unlisted]
     def pull(self, number):
         return copy.deepcopy(next(p for p in self.members if p['number'] == number))
     def contexts(self, head):
@@ -57,19 +67,20 @@ class Consumer:
         if payload is None:
             if '/statuses?' in path:
                 page = int(path.rsplit('page=', 1)[-1])
-                return copy.deepcopy(list(reversed(self.statuses))[(page - 1) * 100:page * 100])
+                return copy.deepcopy(list(reversed(self.listed('status', self.statuses)))[(page - 1) * 100:page * 100])
             if '/check-runs/' in path:
                 return copy.deepcopy(self.checks[int(path.rsplit('/', 1)[-1]) - 1])
-            return {'total_count': len(self.checks), 'check_runs': copy.deepcopy(self.checks)}
+            checks = self.listed('check', self.checks)
+            return {'total_count': len(checks), 'check_runs': copy.deepcopy(checks)}
         self.writes.append((method, copy.deepcopy(payload)))
         if '/statuses/' in path:
             status = dict(payload, id=len(self.statuses) + 1,
                           creator=dict(id=41898282, login='github-actions[bot]', type='Bot'))
-            self.statuses.append(status)
+            self.statuses.append(self.created('status', status))
             return copy.deepcopy(status)
         if method == 'POST':
             check = dict(payload, id=len(self.checks) + 1, app={"id": 15368})
-            self.checks.append(check)
+            self.checks.append(self.created('check', check))
             if self.ambiguous:
                 self.ambiguous = False
                 raise APIError('response lost after server committed POST', ambiguous=True)
@@ -107,6 +118,13 @@ class ExecutionContracts(unittest.TestCase):
         self.assertEqual(github.checks[0]['conclusion'], 'success')
         self.assertEqual(sum(method == 'POST' and payload.get('name') == 'DCO audit' for method, payload in github.writes), 1)
         self.assertEqual(len(github.statuses), 2)
+
+    def test_listing_lag_after_creation_still_certifies(self):
+        github = Consumer(); github.lagging = True
+        self.assertEqual(self.execute(github), 0)
+        self.assertEqual(len(github.checks), 1)
+        self.assertEqual(github.checks[0]['conclusion'], 'success')
+        self.assertEqual([status['state'] for status in github.statuses], ['pending', 'success'])
 
     def test_ambiguous_post_reconciles_without_duplicate(self):
         github = Consumer(); github.ambiguous = True

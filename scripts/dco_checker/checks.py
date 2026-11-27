@@ -73,6 +73,21 @@ class Audit:
             self.validate(matching[0])
         return matching[0] if matching else None
 
+    def authority(self):
+        """Confirm this execution still owns its pending check.
+
+        The listing reports newer executions and duplicates but can omit a check
+        created seconds earlier, so the identified check is read directly.
+        """
+        listed = self.reconcile()
+        if listed is not None:
+            if listed["id"] != self.check["id"]:
+                raise Refused("Pending check identity was lost")
+            return listed
+        identified = self.github.api(f"repos/{self.github.repository}/check-runs/{self.check['id']}")
+        self.validate(identified)
+        return identified
+
     def start(self):
         existing = self.reconcile()
         if existing:
@@ -103,9 +118,7 @@ class Audit:
                 isinstance(output, dict) and all(output.get(key) == value for key, value in payload["output"].items()))
 
     def finish(self, conclusion, summary):
-        current = self.reconcile()
-        if current is None or current["id"] != self.check["id"]:
-            raise Refused("Pending check identity was lost")
+        self.authority()
         payload = {"status": "completed", "conclusion": conclusion,
                    "output": self.output("DCO certified" if conclusion == "success" else "DCO certification failed", summary)}
         path = f"repos/{self.github.repository}/check-runs/{self.check['id']}"
@@ -133,6 +146,4 @@ class Audit:
                     raise Refused("Audit completion could not be confirmed; required DCO gate remains pending") from error
                 # One identified PATCH retry is idempotent. Reestablish current
                 # execution authority rather than overwriting a newer publisher.
-                current = self.reconcile()
-                if current is None or current["id"] != self.check["id"]:
-                    raise Refused("Audit check identity was lost during completion recovery")
+                self.authority()

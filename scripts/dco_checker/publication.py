@@ -15,7 +15,7 @@ class Publication:
         return self.audit.check
 
     def recover_terminal(self):
-        existing_audit = self.audit.reconcile()
+        existing_audit = self.audit.authority() if self.audit.check is not None else self.audit.reconcile()
         existing_gate = self.gate.inspect()
         if (existing_audit is not None and existing_audit.get("status") == "completed" and
             existing_gate is not None and existing_gate.get("target_url") == self.gate.target_url and
